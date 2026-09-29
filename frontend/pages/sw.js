@@ -11,7 +11,7 @@ registerRoute(new NavigationRoute(createHandlerBoundToURL('index.html')))
 const DATA = 'data-v1'
 
 // Red primero; sin red, responde desde caché marcando x-from-cache para que la UI no falsee la sincronización
-registerRoute(({ url }) => url.pathname.endsWith('/cupos.json'), async ({ request }) => {
+registerRoute(({ request, url }) => request.method === 'GET' && url.pathname === '/api/cupos', async ({ request }) => {
   const cache = await caches.open(DATA)
   try {
     const res = await fetch(request)

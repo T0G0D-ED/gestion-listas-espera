@@ -34,6 +34,20 @@ Se propone el desarrollo de un sistema centralizado de gestión y seguimiento de
 * **Base de Datos:** PostgreSQL (Servidor Central) + IndexedDB / SQLite (Cálculo local y soporte Offline).
 * **Control de Versiones & Gestión:** Git, GitHub.
 
+## API y PostgreSQL
+
+La API central expone `GET /api/cupos` para consultar disponibilidad y `POST /api/cupos/reservar` para reservar una plaza. La reserva se ejecuta en una transacción PostgreSQL: la disponibilidad se decrementa solo si todavía es mayor que cero, y una interconsulta solo puede tener una reserva en toda la red.
+
+Para iniciar el backend local:
+
+1. Copia `.env.example` a `.env` y configura `DATABASE_URL` con la conexión PostgreSQL entregada para el proyecto.
+2. Ejecuta `npm run db:migrate` para crear las tablas.
+3. Ejecuta `npm run db:seed` para cargar los cupos de ejemplo sin sobrescribir reservas existentes.
+4. Ejecuta `npm run dev:backend` para iniciar la API en el puerto 3000.
+5. Ejecuta `npm run dev` o `npm run preview` para iniciar el frontend. El proxy `/api` apunta al backend local.
+
+La reserva recibe `cupoId`, `interconsultaId` y `centroSolicitante`; se usa el identificador de interconsulta y no el RUT del paciente. Antes de desplegar en la red asistencial, el endpoint debe derivar el centro y la identidad desde autenticación institucional; CORS no reemplaza autenticación ni autorización.
+
 ---
 
 ## Organización del Repositorio

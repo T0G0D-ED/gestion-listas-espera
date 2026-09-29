@@ -1,0 +1,35 @@
+const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+
+async function request(path, options = {}) {
+  const response = await fetch(`${apiBase}${path}`, {
+    ...options,
+    headers: {
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...options.headers,
+    },
+  })
+  const payload = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    const error = new Error(payload.error || 'No fue posible completar la solicitud.')
+    error.status = response.status
+    throw error
+  }
+
+  return payload
+}
+
+export async function getCupos() {
+  const result = await request('/api/cupos', { cache: 'no-store' })
+  if (!Array.isArray(result.data)) {
+    throw new Error('La API no devolvió cupos. Verifica que el backend esté iniciado y que /api/cupos responda JSON.')
+  }
+  return result.data
+}
+
+export async function reservarCupo({ cupoId, interconsultaId, centroSolicitante }) {
+  return request('/api/cupos/reservar', {
+    method: 'POST',
+    body: JSON.stringify({ cupoId, interconsultaId, centroSolicitante }),
+  })
+}

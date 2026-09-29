@@ -7,6 +7,7 @@ import { registerSW } from 'virtual:pwa-register'
 import { appTemplate } from '../components/App.js'
 import { renderReceiptModal } from '../components/ReceiptModal.js'
 import { renderSelectionPanel } from '../components/SelectionPanel.js'
+import { getCupos, reservarCupo } from '../services/api.js'
 import { downloadReceiptPdf } from '../services/receipt.js'
 
 document.querySelector('#app').innerHTML = appTemplate
@@ -16,7 +17,7 @@ const store = {
   get: (k, d = null) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
-const state = { slots: [], filtered: [], page: 1, per: 4, selectedId: store.get('selectedId'), confirmed: store.get('confirmed') };
+const state = { slots: [], filtered: [], page: 1, per: 4, selectedId: store.get('selectedId'), confirmed: store.get('confirmed'), loadError: null, reservationError: null };
 
 const dtf = new Intl.DateTimeFormat('es-CL', { weekday: 'short', day: '2-digit', month: 'short' });
 const tf  = new Intl.DateTimeFormat('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -26,11 +27,13 @@ const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 // ---------- Datos y conectividad ----------
 async function load() {
   try {
-    const res = await fetch('/cupos.json', { cache: 'no-store' });
-    state.slots = await res.json();
-    // Solo se actualiza la marca de sincronización si los datos vinieron de la red
-    if (!res.headers.get('x-from-cache') && res.ok) store.set('lastSync', new Date().toISOString());
-  } catch { state.slots = []; }
+    state.slots = await getCupos();
+    state.loadError = null;
+    if (online()) store.set('lastSync', new Date().toISOString());
+  } catch (error) {
+    state.slots = [];
+    state.loadError = error.message;
+  }
   renderSync(); populateEstablecimientos(); applyFilters();
 }
 const online = () => navigator.onLine;
@@ -53,7 +56,7 @@ function populateEstablecimientos() {
 function applyFilters() {
   const f = Object.fromEntries(new FormData($('#filters')));
   state.filtered = state.slots
-    .filter(s => (!f.est || s.est === f.est) && (!f.mod || s.mod === f.mod)
+    .filter(s => s.cupos > 0 && (!f.est || s.est === f.est) && (!f.mod || s.mod === f.mod)
       && (!f.desde || s.at.slice(0, 10) >= f.desde) && (!f.hasta || s.at.slice(0, 10) <= f.hasta))
     .sort((a, b) => a.at.localeCompare(b.at));
   state.page = 1; renderList();
@@ -66,7 +69,14 @@ function renderList() {
   const { filtered: L, page, per } = state, pages = Math.max(1, Math.ceil(L.length / per));
   $('#res-title').textContent = `${L.length} cupos disponibles`;
   const slice = L.slice((page - 1) * per, page * per);
-  $('#list').innerHTML = slice.length ? slice.map(row).join('') : '<li class="text-sm text-slate-500 p-6 text-center">No hay cupos con estos criterios. Amplía el rango de fechas o quita filtros.</li>';
+  if (slice.length) {
+    $('#list').innerHTML = slice.map(row).join('');
+  } else {
+    const empty = document.createElement('li');
+    empty.className = 'text-sm text-slate-500 p-6 text-center';
+    empty.textContent = state.loadError || 'No hay cupos con estos criterios. Amplía el rango de fechas o quita filtros.';
+    $('#list').replaceChildren(empty);
+  }
   $('#range').textContent = L.length ? `Mostrando ${(page - 1) * per + 1}-${(page - 1) * per + slice.length} de ${L.length} cupos` : '';
   $('#pager').innerHTML = Array.from({ length: pages }, (_, i) => i + 1).map(n =>
     `<button data-page="${n}" ${n === page ? 'aria-current="page"' : ''} class="h-8 w-8 rounded-lg border ${n === page ? 'bg-brand text-white border-brand' : 'border-slate-300 hover:bg-slate-50'}">${n}</button>`).join('');
@@ -95,6 +105,9 @@ function renderPanel() {
     longDate: long,
     capitalize: cap,
   })
+  const error = $('#reservation-error')
+  error.textContent = state.reservationError || ''
+  error.hidden = !state.reservationError
 }
 function openReceiptModal(slot) {
   const receiptId = `CES-${Date.now()}`
@@ -133,10 +146,24 @@ $('#panel').addEventListener('click', async e => {
     const slot = state.slots.find(item => item.id === state.selectedId)
     if (!slot) return
     e.target.disabled = true; e.target.textContent = 'Confirmando…';
-    // TODO: reemplazar por POST real a la API de agendamiento
-    await new Promise(r => setTimeout(r, 600));
-    state.confirmed = slot.id; store.set('confirmed', state.confirmed); renderPanel();
-    openReceiptModal(slot)
+    state.reservationError = null
+    try {
+      const result = await reservarCupo({
+        cupoId: slot.id,
+        interconsultaId: 'IC-2026-000184',
+        centroSolicitante: 'CESFAM Nuevo Horizonte',
+      })
+      const updatedSlot = { ...slot, ...result.data.slot }
+      state.slots = state.slots.map(item => item.id === slot.id ? updatedSlot : item)
+      state.confirmed = slot.id
+      store.set('confirmed', state.confirmed)
+      renderList()
+      openReceiptModal(updatedSlot)
+    } catch (error) {
+      state.reservationError = error.message
+      if (error.status === 409) await load()
+      renderPanel()
+    }
   }
 });
 

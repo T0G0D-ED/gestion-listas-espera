@@ -5,7 +5,9 @@ import '@fontsource/inter/latin-700.css'
 import '../assets/style.css'
 import { registerSW } from 'virtual:pwa-register'
 import { appTemplate } from '../components/App.js'
+import { renderReceiptModal } from '../components/ReceiptModal.js'
 import { renderSelectionPanel } from '../components/SelectionPanel.js'
+import { downloadReceiptPdf } from '../services/receipt.js'
 
 document.querySelector('#app').innerHTML = appTemplate
 
@@ -94,6 +96,29 @@ function renderPanel() {
     capitalize: cap,
   })
 }
+function openReceiptModal(slot) {
+  const receiptId = `CES-${Date.now()}`
+  const date = cap(new Intl.DateTimeFormat('es-CL', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  }).format(new Date(slot.at)))
+  const time = tf.format(new Date(slot.at))
+  $('#modal-root').innerHTML = renderReceiptModal({ slot, receiptId, date, time })
+
+  const dialog = $('#receipt-modal')
+  const previewToggle = $('#receipt-preview-toggle')
+  const preview = $('#receipt-preview')
+  previewToggle.addEventListener('click', () => {
+    preview.hidden = !preview.hidden
+    previewToggle.setAttribute('aria-expanded', String(!preview.hidden))
+    previewToggle.textContent = preview.hidden ? 'Previsualizar comprobante' : 'Ocultar vista previa'
+  })
+  $('#receipt-download').addEventListener('click', () => downloadReceiptPdf(slot, receiptId))
+  $('#receipt-close').addEventListener('click', () => dialog.close())
+  dialog.addEventListener('click', event => {
+    if (event.target === dialog) dialog.close()
+  })
+  dialog.showModal()
+}
 
 // ---------- Eventos ----------
 $('#list').addEventListener('click', e => {
@@ -105,10 +130,13 @@ $('#pager').addEventListener('click', e => { const n = e.target.dataset.page; if
 $('#panel').addEventListener('click', async e => {
   if (e.target.id === 'change') { state.selectedId = null; store.set('selectedId', null); renderList(); }
   if (e.target.id === 'confirm' && online()) {
+    const slot = state.slots.find(item => item.id === state.selectedId)
+    if (!slot) return
     e.target.disabled = true; e.target.textContent = 'Confirmando…';
     // TODO: reemplazar por POST real a la API de agendamiento
     await new Promise(r => setTimeout(r, 600));
-    state.confirmed = state.selectedId; store.set('confirmed', state.confirmed); renderPanel();
+    state.confirmed = slot.id; store.set('confirmed', state.confirmed); renderPanel();
+    openReceiptModal(slot)
   }
 });
 

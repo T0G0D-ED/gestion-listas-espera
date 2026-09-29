@@ -3,9 +3,19 @@ import { defineConfig } from 'vite'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+const apiProxy = {
+  '/api': {
+    target: 'http://127.0.0.1:3000',
+    changeOrigin: true,
+  },
+}
+
 export default defineConfig({
   root: 'frontend',
+  envDir: '..',
   publicDir: 'data',
+  server: { proxy: apiProxy },
+  preview: { proxy: apiProxy },
   plugins: [
     tailwindcss(),
     {

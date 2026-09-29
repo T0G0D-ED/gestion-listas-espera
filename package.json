@@ -1,26 +1,33 @@
 {
-  "name": "gestion-de-cesfam",
-  "version": "1.0.0",
-  "description": "En los Centros de Salud Familiar (CESFAM) de comunas con alta demanda, la derivación e interconsulta hacia la atención secundaria presenta severas fallas de sincronización. Al gestionarse mediante planillas y registros dispersos entre establecimientos, los equipos de salud enfrentan dificultades para priorizar casos según criterios clínicos y mantener informados a los pacientes sobre sus tiempos de espera. Esta falta de un mecanismo centralizado y confiable genera incertidumbre, reclamos y el riesgo constante de postergar atenciones clínicamente urgentes.",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/T0G0D-ED/gestion-listas-espera.git"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "bugs": {
-    "url": "https://github.com/T0G0D-ED/gestion-listas-espera/issues"
-  },
-  "homepage": "https://github.com/T0G0D-ED/gestion-listas-espera#readme",
-  "dependencies": {
-    "cors": "^2.8.6",
-    "express": "^5.2.1"
-  }
+    "name": "cesfam-pwa",
+    "private": true,
+    "version": "0.1.0",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "preview": "vite preview --host",
+        "dev:backend": "node --watch backend/server.js",
+        "start:backend": "node backend/server.js",
+        "db:migrate": "node backend/db/migrate.js",
+        "db:seed": "node backend/db/seed.js",
+        "test:backend": "node --test backend/cuposRepository.test.js"
+    },
+    "devDependencies": {
+        "@tailwindcss/vite": "^4.3.3",
+        "tailwindcss": "^4.3.3",
+        "vite": "^8.3.1",
+        "vite-plugin-pwa": "^1.3.0",
+        "workbox-core": "^7.4.1",
+        "workbox-precaching": "^7.4.1",
+        "workbox-routing": "^7.4.1"
+    },
+    "dependencies": {
+        "@fontsource/inter": "^5.3.0",
+        "cors": "^2.8.6",
+        "dotenv": "^18.0.4",
+        "express": "^5.2.1",
+        "jspdf": "^4.2.1",
+        "pg": "^8.23.0"
+    }
 }
-{"name":"cesfam-pwa","private":true,"version":"0.1.0","type":"module","scripts":{"dev":"vite","build":"vite build","preview":"vite preview --host"},"devDependencies":{"@tailwindcss/vite":"^4.3.3","tailwindcss":"^4.3.3","vite":"^8.3.1","vite-plugin-pwa":"^1.3.0","workbox-core":"^7.4.1","workbox-precaching":"^7.4.1","workbox-routing":"^7.4.1"},"dependencies":{"@fontsource/inter":"^5.3.0","jspdf":"^4.2.1"}}

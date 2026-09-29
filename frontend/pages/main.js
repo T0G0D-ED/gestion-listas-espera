@@ -17,7 +17,7 @@ const store = {
   get: (k, d = null) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
-const state = { slots: [], filtered: [], page: 1, per: 4, selectedId: store.get('selectedId'), confirmed: store.get('confirmed'), loadError: null, reservationError: null };
+const state = { slots: [], filtered: [], page: 1, per: 4, selectedId: store.get('selectedId'), confirmed: store.get('confirmed'), loadError: null, reservationError: null, existingReservation: false };
 
 const dtf = new Intl.DateTimeFormat('es-CL', { weekday: 'short', day: '2-digit', month: 'short' });
 const tf  = new Intl.DateTimeFormat('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -108,6 +108,7 @@ function renderPanel() {
   const error = $('#reservation-error')
   error.textContent = state.reservationError || ''
   error.hidden = !state.reservationError
+  $('#manage-existing-reservation').hidden = !state.existingReservation
 }
 function openReceiptModal(slot) {
   const receiptId = `CES-${Date.now()}`
@@ -137,6 +138,7 @@ function openReceiptModal(slot) {
 $('#list').addEventListener('click', e => {
   const b = e.target.closest('[data-id]'); if (!b) return;
   state.selectedId = b.dataset.id; state.confirmed = null;
+  state.reservationError = null; state.existingReservation = false;
   store.set('selectedId', state.selectedId); store.set('confirmed', null); renderList();
 });
 $('#pager').addEventListener('click', e => { const n = e.target.dataset.page; if (n) { state.page = +n; renderList(); } });
@@ -152,6 +154,8 @@ $('#panel').addEventListener('click', async e => {
         cupoId: slot.id,
         interconsultaId: 'IC-2026-000184',
         centroSolicitante: 'CESFAM Nuevo Horizonte',
+        especialidad: 'Traumatología adulto',
+        prioridadClinica: 1,
       })
       const updatedSlot = { ...slot, ...result.data.slot }
       state.slots = state.slots.map(item => item.id === slot.id ? updatedSlot : item)
@@ -160,7 +164,10 @@ $('#panel').addEventListener('click', async e => {
       renderList()
       openReceiptModal(updatedSlot)
     } catch (error) {
-      state.reservationError = error.message
+      state.existingReservation = error.status === 409 && error.message.includes('cita activa')
+      state.reservationError = state.existingReservation
+        ? 'Esta interconsulta ya tiene una cita. Para elegir otro horario, reprográmala desde Gestionar.'
+        : error.message
       if (error.status === 409) await load()
       renderPanel()
     }

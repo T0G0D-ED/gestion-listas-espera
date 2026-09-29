@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --color-brand: #0f5c55;
+  --color-brand-dark: #0a4540;
+  --color-brand-tint: #e3f1ee;
+  --color-warn-bg: #fdf3d0;
+  --color-warn-ink: #7a5a00;
+}
+
+:focus-visible { outline: 3px solid var(--color-brand); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

@@ -20,4 +20,5 @@ ${offlineBannerTemplate}
       <section id="panel" class="bg-white border-2 border-brand rounded-xl p-5 text-sm" aria-live="polite"></section>
     </aside>
   </div>
-</main>`
+</main>
+<div id="modal-root"></div>`

@@ -1,2 +1,8 @@
+<<<<<<< HEAD
 # Ignora los archivos relacionados a API keys
 .env
+=======
+node_modules
+dist
+dev-dist
+>>>>>>> feature/interfaz

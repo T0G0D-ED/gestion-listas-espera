@@ -1,0 +1,122 @@
+[
+ {
+  "id": "c1",
+  "at": "2026-09-30T09:30",
+  "doctor": "Dra. Camila Rojas",
+  "est": "Hospital Comunitario El Pino",
+  "comuna": "San Bernardo",
+  "mod": "Presencial",
+  "cupos": 1,
+  "min": 20
+ },
+ {
+  "id": "c2",
+  "at": "2026-10-01T11:00",
+  "doctor": "Dr. Felipe Arancibia",
+  "est": "Hospital Barros Luco",
+  "comuna": "San Miguel",
+  "mod": "Presencial",
+  "cupos": 2,
+  "min": 35
+ },
+ {
+  "id": "c3",
+  "at": "2026-10-02T08:45",
+  "doctor": "Dra. Paula Henríquez",
+  "est": "Centro de Especialidades La Cisterna",
+  "comuna": "La Cisterna",
+  "mod": "Teleatención",
+  "cupos": 1,
+  "min": 12
+ },
+ {
+  "id": "c4",
+  "at": "2026-10-05T15:10",
+  "doctor": "Dr. Ignacio Vera",
+  "est": "Hospital de Buin",
+  "comuna": "Buin",
+  "mod": "Presencial",
+  "cupos": 3,
+  "min": 50
+ },
+ {
+  "id": "c5",
+  "at": "2026-10-06T10:20",
+  "doctor": "Dra. Marta Soto",
+  "est": "Hospital Comunitario El Pino",
+  "comuna": "San Bernardo",
+  "mod": "Presencial",
+  "cupos": 1,
+  "min": 20
+ },
+ {
+  "id": "c6",
+  "at": "2026-10-07T14:00",
+  "doctor": "Dr. Andrés Pino",
+  "est": "Hospital Barros Luco",
+  "comuna": "San Miguel",
+  "mod": "Presencial",
+  "cupos": 2,
+  "min": 35
+ },
+ {
+  "id": "c7",
+  "at": "2026-10-08T09:00",
+  "doctor": "Dra. Camila Rojas",
+  "est": "Centro de Especialidades La Cisterna",
+  "comuna": "La Cisterna",
+  "mod": "Teleatención",
+  "cupos": 1,
+  "min": 12
+ },
+ {
+  "id": "c8",
+  "at": "2026-10-09T12:30",
+  "doctor": "Dr. Felipe Arancibia",
+  "est": "Hospital de Buin",
+  "comuna": "Buin",
+  "mod": "Presencial",
+  "cupos": 3,
+  "min": 50
+ },
+ {
+  "id": "c9",
+  "at": "2026-10-12T08:15",
+  "doctor": "Dra. Paula Henríquez",
+  "est": "Hospital Comunitario El Pino",
+  "comuna": "San Bernardo",
+  "mod": "Presencial",
+  "cupos": 1,
+  "min": 20
+ },
+ {
+  "id": "c10",
+  "at": "2026-10-13T16:00",
+  "doctor": "Dr. Ignacio Vera",
+  "est": "Hospital Barros Luco",
+  "comuna": "San Miguel",
+  "mod": "Presencial",
+  "cupos": 2,
+  "min": 35
+ },
+ {
+  "id": "c11",
+  "at": "2026-10-13T10:40",
+  "doctor": "Dra. Marta Soto",
+  "est": "Centro de Especialidades La Cisterna",
+  "comuna": "La Cisterna",
+  "mod": "Teleatención",
+  "cupos": 1,
+  "min": 12
+ },
+ {
+  "id": "c12",
+  "at": "2026-10-13T11:30",
+  "doctor": "Dr. Andrés Pino",
+  "est": "Hospital de Buin",
+  "comuna": "Buin",
+  "mod": "Presencial",
+  "cupos": 3,
+  "min": 50
+ }
+]

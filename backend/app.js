@@ -9,6 +9,7 @@ import {
   reserveSlot,
   rescheduleReservation,
 } from './cuposRepository.js'
+import { sendAppointmentNotification } from './resendNotifications.js'
 
 const defaultOrigins = [
   'http://localhost:4173',

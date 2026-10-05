@@ -19,32 +19,71 @@ CREATE TABLE IF NOT EXISTS appointment_reservations (
   slot_id TEXT NOT NULL REFERENCES appointment_slots(id),
   interconsulta_id TEXT NOT NULL,
   centro_solicitante TEXT NOT NULL,
+  especialidad TEXT NOT NULL DEFAULT 'Traumatología adulto',
+  prioridad_clinica SMALLINT NOT NULL DEFAULT 0 CHECK (prioridad_clinica BETWEEN 0 AND 3),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  cancellation_reason TEXT,
   reserved_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  status TEXT NOT NULL DEFAULT 'reserved'
-    CHECK (status IN ('reserved', 'cancelled')),
-  cancelled_at TIMESTAMPTZ
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE appointment_reservations
-  ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'reserved';
-ALTER TABLE appointment_reservations
-  ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
-ALTER TABLE appointment_reservations
-  DROP CONSTRAINT IF EXISTS appointment_reservations_interconsulta_id_key;
+  ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active',
+  ADD COLUMN IF NOT EXISTS cancellation_reason TEXT,
+  ADD COLUMN IF NOT EXISTS especialidad TEXT NOT NULL DEFAULT 'Traumatología adulto',
+  ADD COLUMN IF NOT EXISTS prioridad_clinica SMALLINT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
-CREATE UNIQUE INDEX IF NOT EXISTS appointment_reservations_active_interconsulta_idx
-  ON appointment_reservations (interconsulta_id)
-  WHERE status = 'reserved';
+DO $$
+BEGIN
+  ALTER TABLE appointment_reservations
+    ADD CONSTRAINT appointment_reservations_status_check
+    CHECK (status IN ('active', 'cancelled'));
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TABLE IF NOT EXISTS appointment_reservation_changes (
+CREATE TABLE IF NOT EXISTS appointment_reservation_events (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   reservation_id BIGINT NOT NULL REFERENCES appointment_reservations(id),
-  action TEXT NOT NULL CHECK (action IN ('rescheduled', 'cancelled')),
-  from_slot_id TEXT NOT NULL REFERENCES appointment_slots(id),
-  to_slot_id TEXT REFERENCES appointment_slots(id),
+  action TEXT NOT NULL CHECK (action IN ('reserved', 'rescheduled', 'cancelled')),
   reason TEXT NOT NULL,
-  changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  from_slot_id TEXT REFERENCES appointment_slots(id),
+  to_slot_id TEXT REFERENCES appointment_slots(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS appointment_waitlist (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  interconsulta_id TEXT NOT NULL UNIQUE,
+  reservation_id BIGINT REFERENCES appointment_reservations(id),
+  especialidad TEXT NOT NULL,
+  centro_solicitante TEXT NOT NULL,
+  prioridad_clinica SMALLINT NOT NULL DEFAULT 0 CHECK (prioridad_clinica BETWEEN 0 AND 3),
+  status TEXT NOT NULL DEFAULT 'waiting' CHECK (status IN ('waiting', 'scheduled', 'withdrawn')),
+  motivo TEXT NOT NULL,
+  entered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO appointment_reservation_events (reservation_id, action, reason, to_slot_id)
+SELECT r.id, 'reserved', 'Reserva registrada antes del historial', r.slot_id
+FROM appointment_reservations AS r
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM appointment_reservation_events AS event
+  WHERE event.reservation_id = r.id
 );
 
 CREATE INDEX IF NOT EXISTS appointment_slots_at_idx
   ON appointment_slots (appointment_at);
+
+CREATE INDEX IF NOT EXISTS appointment_reservations_status_idx
+  ON appointment_reservations (status, reserved_at DESC);
+
+CREATE INDEX IF NOT EXISTS appointment_reservation_events_reservation_idx
+  ON appointment_reservation_events (reservation_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS appointment_waitlist_priority_fifo_idx
+  ON appointment_waitlist (prioridad_clinica DESC, entered_at ASC, id ASC)
+  WHERE status = 'waiting';

@@ -3,5 +3,5 @@ dist
 dev-dist
 .env
 .env.*
-!.env.example
+
 

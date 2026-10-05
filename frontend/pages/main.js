@@ -7,7 +7,11 @@ import { registerSW } from 'virtual:pwa-register'
 import { appTemplate } from '../components/App.js'
 import { renderReceiptModal } from '../components/ReceiptModal.js'
 import { renderSelectionPanel } from '../components/SelectionPanel.js'
-import { getCupos, reservarCupo } from '../services/api.js'
+import {
+  getCupos,
+  getReservas,
+  reservarCupo,
+} from '../services/api.js'
 import { downloadReceiptPdf } from '../services/receipt.js'
 
 document.querySelector('#app').innerHTML = appTemplate
@@ -34,9 +38,39 @@ async function load() {
     state.slots = [];
     state.loadError = error.message;
   }
-  renderSync(); populateEstablecimientos(); applyFilters();
+  try {
+    state.reservations = await getReservas()
+    state.reservationsError = null
+  } catch (error) {
+    state.reservations = []
+    state.reservationsError = error.message
+  }
+  renderSync(); renderReferralContext(); populateEstablecimientos(); applyFilters();
 }
 const online = () => navigator.onLine;
+function renderReferralContext(message = '') {
+  const reservedIds = new Set(state.reservations.map(reservation => reservation.interconsultaId))
+  const nextId = findNextReferralId(reservedIds)
+  $('#current-referral-id').textContent = interconsultaId
+  $('#next-referral').disabled = !nextId || Boolean(state.reservationsError)
+  $('#referral-message').textContent = message || (
+    state.reservationsError
+      ? 'No se pudo comprobar qué interconsultas ya tienen cita.'
+      : nextId
+        ? reservedIds.has(interconsultaId)
+          ? 'Esta interconsulta ya tiene una cita. Selecciona la siguiente para reservar otro ejemplo.'
+          : 'Puedes avanzar para asignar otra interconsulta de ejemplo.'
+        : 'No quedan interconsultas de ejemplo disponibles.'
+  )
+}
+function findNextReferralId(reservedIds) {
+  const currentIndex = exampleReferralIds.indexOf(interconsultaId)
+  for (let offset = 1; offset < exampleReferralIds.length; offset += 1) {
+    const candidate = exampleReferralIds[(currentIndex + offset) % exampleReferralIds.length]
+    if (!reservedIds.has(candidate)) return candidate
+  }
+  return null
+}
 function renderSync() {
   const t = store.get('lastSync');
   $('#sync').textContent = t ? `${cap(dtf.format(new Date(t)))} · ${tf.format(new Date(t))}` : 'Sin datos sincronizados';
@@ -46,6 +80,21 @@ function renderSync() {
 addEventListener('online', () => { renderSync(); load(); });
 addEventListener('offline', renderSync);
 $('#refresh').addEventListener('click', load);
+$('#next-referral').addEventListener('click', () => {
+  const reservedIds = new Set(state.reservations.map(reservation => reservation.interconsultaId))
+  const nextId = findNextReferralId(reservedIds)
+  if (!nextId) {
+    renderReferralContext('No quedan interconsultas de ejemplo disponibles.')
+    return
+  }
+  interconsultaId = nextId
+  store.set('interconsultaId', interconsultaId)
+  state.confirmed = null
+  state.reservationError = null
+  store.set('confirmed', null)
+  renderReferralContext()
+  renderPanel()
+})
 
 // ---------- Filtros ----------
 function populateEstablecimientos() {
@@ -97,10 +146,15 @@ function row(s) {
 }
 function renderPanel() {
   const slot = state.slots.find(item => item.id === state.selectedId)
+  const existingReservation = state.reservations.find(item =>
+    item.interconsultaId === interconsultaId,
+  )
   $('#panel').innerHTML = renderSelectionPanel({
     slot,
     online: online(),
     confirmed: state.confirmed,
+    existingReservation,
+    reservationCheckError: state.reservationsError,
     timeFormat: tf,
     longDate: long,
     capitalize: cap,
@@ -110,13 +164,13 @@ function renderPanel() {
   error.hidden = !state.reservationError
   $('#manage-existing-reservation').hidden = !state.existingReservation
 }
-function openReceiptModal(slot) {
+function openReceiptModal(slot, notification) {
   const receiptId = `CES-${Date.now()}`
   const date = cap(new Intl.DateTimeFormat('es-CL', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   }).format(new Date(slot.at)))
   const time = tf.format(new Date(slot.at))
-  $('#modal-root').innerHTML = renderReceiptModal({ slot, receiptId, date, time })
+  $('#modal-root').innerHTML = renderReceiptModal({ slot, receiptId, date, time, notification })
 
   const dialog = $('#receipt-modal')
   const previewToggle = $('#receipt-preview-toggle')
@@ -152,17 +206,24 @@ $('#panel').addEventListener('click', async e => {
     try {
       const result = await reservarCupo({
         cupoId: slot.id,
-        interconsultaId: 'IC-2026-000184',
+        interconsultaId,
         centroSolicitante: 'CESFAM Nuevo Horizonte',
         especialidad: 'Traumatología adulto',
         prioridadClinica: 1,
       })
       const updatedSlot = { ...slot, ...result.data.slot }
       state.slots = state.slots.map(item => item.id === slot.id ? updatedSlot : item)
+      try {
+        state.reservations = await getReservas()
+        state.reservationsError = null
+      } catch (error) {
+        state.reservationsError = error.message
+      }
       state.confirmed = slot.id
       store.set('confirmed', state.confirmed)
+      renderReferralContext()
       renderList()
-      openReceiptModal(updatedSlot)
+      openReceiptModal(updatedSlot, result.data.notification)
     } catch (error) {
       state.existingReservation = error.status === 409 && error.message.includes('cita activa')
       state.reservationError = state.existingReservation

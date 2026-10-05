@@ -230,6 +230,12 @@ export async function reserveSlot(pool, {
         reservationId: reservation.rows[0].id,
         reservedAt: reservation.rows[0].reserved_at,
         slot: updated.rows[0],
+        notification: {
+          action: 'reserved',
+          interconsultaId,
+          centroSolicitante,
+          previousSlot: updated.rows[0],
+        },
       },
     }
   } catch (error) {

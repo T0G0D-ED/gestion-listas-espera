@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS appointment_slots (
 CREATE TABLE IF NOT EXISTS appointment_reservations (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   slot_id TEXT NOT NULL REFERENCES appointment_slots(id),
-  interconsulta_id TEXT NOT NULL UNIQUE,
+  interconsulta_id TEXT NOT NULL,
   centro_solicitante TEXT NOT NULL,
   especialidad TEXT NOT NULL DEFAULT 'Traumatología adulto',
   prioridad_clinica SMALLINT NOT NULL DEFAULT 0 CHECK (prioridad_clinica BETWEEN 0 AND 3),

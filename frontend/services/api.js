@@ -35,6 +35,23 @@ export async function getInterconsultaTimeline(interconsultaId) {
   return result.data
 }
 
+export async function getDemoPatients() {
+  const result = await request('/api/pacientes/ruts-demostracion', { cache: 'no-store' })
+  if (!Array.isArray(result.data)) {
+    throw new Error('La API no devolvió los RUTs de demostración.')
+  }
+  return result.data
+}
+
+export async function getPatientTimelineByRut(rut) {
+  const query = new URLSearchParams({ rut })
+  const result = await request(`/api/pacientes/linea-tiempo?${query}`, { cache: 'no-store' })
+  if (!Array.isArray(result.data) || typeof result.interconsultaId !== 'string') {
+    throw new Error('La API no devolvió la línea de tiempo asociada al RUT.')
+  }
+  return result
+}
+
 export async function getCupos() {
   const result = await request('/api/cupos', { cache: 'no-store' })
   if (!Array.isArray(result.data)) {

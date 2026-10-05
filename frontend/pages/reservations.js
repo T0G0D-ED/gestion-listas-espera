@@ -4,7 +4,7 @@ import '@fontsource/inter/latin-600.css'
 import '@fontsource/inter/latin-700.css'
 import '../assets/style.css'
 import { registerSW } from 'virtual:pwa-register'
-import { renderHeader } from '../components/Header.js'
+import { bindRoleSwitcher, renderHeader } from '../components/Header.js'
 import {
   renderReservationActionDialog,
   renderReservationsList,
@@ -24,6 +24,7 @@ document.querySelector('#app').innerHTML = `
     <section id="reservations-page" class="rounded-xl border border-slate-200 bg-white" aria-labelledby="reservations-title"></section>
   </main>
   <div id="modal-root">${reservationsDialogTemplate()}</div>`
+bindRoleSwitcher()
 
 const $ = selector => document.querySelector(selector)
 function getLastSync() {

@@ -4,6 +4,7 @@ import '@fontsource/inter/latin-600.css'
 import '@fontsource/inter/latin-700.css'
 import '../assets/style.css'
 import { registerSW } from 'virtual:pwa-register'
+import { bindRoleSwitcher } from '../components/Header.js'
 import { appTemplate } from '../components/App.js'
 import { renderPendingSyncDetails } from '../components/PendingSyncPanel.js'
 import { renderReceiptModal } from '../components/ReceiptModal.js'
@@ -24,6 +25,7 @@ import {
 import { downloadReceiptPdf } from '../services/receipt.js'
 
 document.querySelector('#app').innerHTML = appTemplate
+bindRoleSwitcher()
 
 const $ = s => document.querySelector(s);
 const store = {

@@ -5,7 +5,11 @@ export const pageHeadingTemplate = `
     <p class="text-slate-500 mt-1">Revisa alternativas de la red asistencial, elige el cupo más adecuado y confirma la selección.</p>
   </div>
   <div class="flex items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm">
-    <div><p class="text-xs text-slate-500">Última sincronización</p><p id="sync" class="font-semibold">—</p><p class="mt-1 text-xs text-slate-600">Pendientes de sincronización: <strong id="pending-sync-count" aria-live="polite">0</strong></p><p id="sync-queue-message" hidden role="status" class="mt-1 max-w-56 text-xs text-amber-800"></p></div>
+    <div><p class="text-xs text-slate-500">Última sincronización</p><p id="sync" class="font-semibold">—</p><p class="mt-1 text-xs text-slate-600">Pendientes de sincronización: <button id="pending-sync-toggle" type="button" aria-expanded="false" aria-controls="pending-sync-panel" class="font-bold text-brand underline decoration-dotted underline-offset-2 hover:text-brand-dark"><span id="pending-sync-count" aria-live="polite">0</span></button></p><p id="sync-queue-message" hidden role="status" class="mt-1 max-w-56 text-xs text-amber-800"></p></div>
     <button id="refresh" class="border border-brand text-brand rounded-lg px-3 py-1.5 font-medium hover:bg-brand-tint">Actualizar</button>
   </div>
+  <section id="pending-sync-panel" hidden aria-labelledby="pending-sync-title" class="mt-4 basis-full rounded-xl border border-amber-200 bg-amber-50 p-4">
+    <h2 id="pending-sync-title" class="font-semibold text-sm">Interconsultas pendientes de sincronización</h2>
+    <div id="pending-sync-details" class="mt-3"></div>
+  </section>
 </div>`

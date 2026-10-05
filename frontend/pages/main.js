@@ -5,8 +5,10 @@ import '@fontsource/inter/latin-700.css'
 import '../assets/style.css'
 import { registerSW } from 'virtual:pwa-register'
 import { appTemplate } from '../components/App.js'
+import { renderPendingSyncDetails } from '../components/PendingSyncPanel.js'
 import { renderReceiptModal } from '../components/ReceiptModal.js'
 import { renderSelectionPanel } from '../components/SelectionPanel.js'
+import { dismissSyncToast, showSyncToast } from '../components/SyncToast.js'
 import {
   getCupos,
   getReservas,
@@ -102,25 +104,55 @@ subscribeToSyncQueueCount(count => {
 async function syncPendingReservations() {
   if (!online() || state.syncingQueue) return
   state.syncingQueue = true
-  let didSync = false
+  let synchronizedCount = 0
+  let failedCount = 0
+  const errors = []
   try {
     const operations = await getPendingSyncOperations()
     state.syncError = null
+    if (operations.length === 0) return
+
     for (const operation of operations) {
-      if (operation.type !== 'reservation') continue
+      if (operation.type !== 'reservation') {
+        failedCount += 1
+        errors.push(`${operation.payload?.interconsultaId || operation.id}: tipo de operación no compatible`)
+        continue
+      }
       try {
         await reservarCupo(operation.payload)
         await removePendingSyncOperation(operation.id)
-        didSync = true
+        synchronizedCount += 1
       } catch (error) {
-        state.syncError = error.message
+        failedCount += 1
+        errors.push(`${operation.payload.interconsultaId}: ${error.message}`)
       }
     }
     await refreshPendingOperations()
-    if (didSync) await load()
+    if (synchronizedCount > 0) await load()
+
+    if (failedCount === 0) {
+      showSyncToast({
+        type: 'success',
+        title: 'Sincronización completada',
+        message: `Se sincronizaron ${synchronizedCount} ${synchronizedCount === 1 ? 'interconsulta' : 'interconsultas'} correctamente.`,
+      })
+      return
+    }
+
+    state.syncError = errors[0]
+    showSyncToast({
+      type: 'warning',
+      title: 'Sincronización incompleta',
+      message: `${synchronizedCount} sincronizadas; ${failedCount} ${failedCount === 1 ? 'sigue' : 'siguen'} pendiente${failedCount === 1 ? '' : 's'}. ${errors[0]}`,
+    })
   } catch (error) {
     state.syncError = error.message
     await refreshPendingOperations()
+    showSyncToast({
+      type: 'warning',
+      title: 'No se pudo completar la sincronización',
+      message: `Las interconsultas continúan en la cola local. ${error.message}`,
+    })
   } finally {
     state.syncingQueue = false
     renderPendingCount()
@@ -137,6 +169,15 @@ function renderPendingCount() {
       ? `Hay operaciones pendientes: ${state.syncError}`
       : ''
   message.hidden = !message.textContent
+  renderPendingSyncPanel()
+}
+function renderPendingSyncPanel() {
+  const details = $('#pending-sync-details')
+  details.innerHTML = renderPendingSyncDetails(
+    state.pendingOperations,
+    state.slots,
+    state.queueError,
+  )
 }
 function renderReferralContext(message = '') {
   const reservedIds = new Set([
@@ -176,6 +217,12 @@ addEventListener('online', () => {
 })
 addEventListener('offline', renderSync);
 $('#refresh').addEventListener('click', load);
+$('#pending-sync-toggle').addEventListener('click', event => {
+  const panel = $('#pending-sync-panel')
+  panel.hidden = !panel.hidden
+  event.currentTarget.setAttribute('aria-expanded', String(!panel.hidden))
+})
+$('#sync-toast-close').addEventListener('click', dismissSyncToast)
 $('#next-referral').addEventListener('click', () => {
   const reservedIds = new Set(state.reservations.map(reservation => reservation.interconsultaId))
   const nextId = findNextReferralId(reservedIds)

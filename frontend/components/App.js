@@ -4,9 +4,11 @@ import { pageHeadingTemplate } from './PageHeading.js'
 import { searchFiltersTemplate } from './SearchFilters.js'
 import { slotResultsTemplate } from './SlotResults.js'
 import { referralContextTemplate } from './ReferralContext.js'
+import { syncToastTemplate } from './SyncToast.js'
 
 export const appTemplate = `
 ${headerTemplate}
+${syncToastTemplate}
 ${offlineBannerTemplate}
 <main class="mx-auto max-w-6xl px-4 py-6">
   ${pageHeadingTemplate}

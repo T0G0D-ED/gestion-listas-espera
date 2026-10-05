@@ -10,4 +10,4 @@ export const referralContextTemplate = `
   <p id="referral-message" class="mt-2 text-xs text-slate-500" aria-live="polite"></p>
   <p class="mt-3 text-xs bg-slate-100 rounded-lg p-2">Vista administrativa: no contiene nombre, RUT ni información clínica.</p>
 </section>
-<p class="bg-brand-tint rounded-xl p-4 text-xs"><strong class="text-sm block">Apoyo de priorización</strong>Considera fecha disponible, distancia y modalidad. Esto ayuda, no reemplaza el criterio clínico ni la coordinación con el equipo de salud.</p>`
+<p class="bg-brand-tint rounded-xl p-4 text-xs"><strong class="text-sm block">Apoyo de priorización</strong>Permite comparar fecha, establecimiento y modalidad. Esto ayuda, no reemplaza el criterio clínico ni la coordinación con el equipo de salud.</p>`

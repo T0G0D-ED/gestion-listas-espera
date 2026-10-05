@@ -6,7 +6,9 @@ self.skipWaiting()
 clientsClaim()
 cleanupOutdatedCaches()
 precacheAndRoute(self.__WB_MANIFEST)          // app shell con hash, generado por Vite
-registerRoute(new NavigationRoute(createHandlerBoundToURL('index.html')))
+registerRoute(new NavigationRoute(createHandlerBoundToURL('index.html'), {
+  allowlist: [/^\/$/],
+}))
 
 const DATA = 'data-v1'
 

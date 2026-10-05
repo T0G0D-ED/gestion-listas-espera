@@ -9,10 +9,13 @@ const slotColumns = `
   cupos_disponibles AS cupos
 `
 
+const defaultActor = { name: 'Administrativo (prototipo)', role: 'administrativo' }
+
 export async function listSlots(pool) {
   const result = await pool.query(`
     SELECT ${slotColumns}
     FROM appointment_slots
+    WHERE appointment_at > LOCALTIMESTAMP
     ORDER BY appointment_at
   `)
 
@@ -92,12 +95,60 @@ export async function listWaitlist(pool) {
   return result.rows
 }
 
+export async function listTimelineEvents(pool, interconsultaId) {
+  const result = await pool.query(`
+    SELECT
+      id::text AS id,
+      interconsulta_id,
+      event_type,
+      title,
+      details,
+      establishment,
+      professional_name,
+      actor_name,
+      actor_role,
+      event_at,
+      is_demo
+    FROM interconsulta_timeline_events
+    WHERE interconsulta_id = $1
+    ORDER BY event_at ASC, id ASC
+  `, [interconsultaId])
+  return result.rows
+}
+
+async function insertTimelineEvent(client, {
+  interconsultaId,
+  eventType,
+  title,
+  details,
+  establishment,
+  professionalName = null,
+  actor = defaultActor,
+}) {
+  await client.query(`
+    INSERT INTO interconsulta_timeline_events (
+      interconsulta_id, event_type, title, details, establishment,
+      professional_name, actor_name, actor_role
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+  `, [
+    interconsultaId,
+    eventType,
+    title,
+    details,
+    establishment,
+    professionalName,
+    actor.name,
+    actor.role,
+  ])
+}
+
 export async function addToWaitlist(pool, {
   interconsultaId,
   especialidad,
   centroSolicitante,
   prioridadClinica,
   reason,
+  actor = defaultActor,
 }) {
   const client = await pool.connect()
   let transactionOpen = false
@@ -129,6 +180,14 @@ export async function addToWaitlist(pool, {
       return { status: 409, error: 'La interconsulta ya está registrada en la lista de espera.' }
     }
 
+    await insertTimelineEvent(client, {
+      interconsultaId,
+      eventType: 'waitlisted',
+      title: 'Interconsulta incorporada a lista de espera',
+      details: reason,
+      establishment: centroSolicitante,
+      actor,
+    })
     await client.query('COMMIT')
     transactionOpen = false
     return { status: 201, data: inserted.rows[0] }
@@ -146,6 +205,7 @@ export async function reserveSlot(pool, {
   centroSolicitante,
   especialidad = 'Traumatología adulto',
   prioridadClinica = 0,
+  actor,
 }) {
   const client = await pool.connect()
   let transactionOpen = false
@@ -171,6 +231,7 @@ export async function reserveSlot(pool, {
       SET cupos_disponibles = cupos_disponibles - 1,
           updated_at = NOW()
       WHERE id = $1 AND cupos_disponibles > 0
+        AND appointment_at > LOCALTIMESTAMP
       RETURNING ${slotColumns}
     `, [cupoId])
 
@@ -220,6 +281,15 @@ export async function reserveSlot(pool, {
       SET status = 'scheduled', reservation_id = $2, updated_at = NOW()
       WHERE interconsulta_id = $1 AND status = 'waiting'
     `, [interconsultaId, reservation.rows[0].id])
+    await insertTimelineEvent(client, {
+      interconsultaId,
+      eventType: prior ? 'appointment_rescheduled' : 'appointment_reserved',
+      title: prior ? 'Cita reprogramada' : 'Cupo asignado',
+      details: prior ? 'Reingreso desde lista de espera' : 'Reserva inicial',
+      establishment: updated.rows[0].est,
+      professionalName: updated.rows[0].doctor,
+      actor,
+    })
 
     await client.query('COMMIT')
     transactionOpen = false
@@ -257,7 +327,7 @@ export async function reserveSlot(pool, {
   }
 }
 
-export async function cancelReservation(pool, { reservationId, reason }) {
+export async function cancelReservation(pool, { reservationId, reason, actor = defaultActor }) {
   const client = await pool.connect()
   let transactionOpen = false
 
@@ -265,10 +335,13 @@ export async function cancelReservation(pool, { reservationId, reason }) {
     await client.query('BEGIN')
     transactionOpen = true
     const found = await client.query(`
-      SELECT id, slot_id, status, interconsulta_id, especialidad,
-             centro_solicitante, prioridad_clinica
-      FROM appointment_reservations
-      WHERE id = $1
+      SELECT r.id, r.slot_id, r.status, r.interconsulta_id, r.especialidad,
+             r.centro_solicitante, r.prioridad_clinica,
+             to_char(s.appointment_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS at,
+             s.doctor, s.establishment AS est, s.modalidad AS mod, s.box
+      FROM appointment_reservations AS r
+      JOIN appointment_slots AS s ON s.id = r.slot_id
+      WHERE r.id = $1
       FOR UPDATE
     `, [reservationId])
 
@@ -315,10 +388,39 @@ export async function cancelReservation(pool, { reservationId, reason }) {
         updated_at = NOW()
     `, [reservation.interconsulta_id, reservationId, reservation.especialidad,
       reservation.centro_solicitante, reservation.prioridad_clinica, reason])
+    await insertTimelineEvent(client, {
+      interconsultaId: reservation.interconsulta_id,
+      eventType: 'appointment_cancelled',
+      title: 'Cita cancelada',
+      details: reason,
+      establishment: reservation.est,
+      professionalName: reservation.doctor,
+      actor,
+    })
 
     await client.query('COMMIT')
     transactionOpen = false
-    return { status: 200, data: { reservationId, status: 'cancelled', reason } }
+    return {
+      status: 200,
+      data: {
+        reservationId,
+        status: 'cancelled',
+        reason,
+        notification: {
+          action: 'cancelled',
+          interconsultaId: reservation.interconsulta_id,
+          centroSolicitante: reservation.centro_solicitante,
+          previousSlot: {
+            at: reservation.at,
+            doctor: reservation.doctor,
+            est: reservation.est,
+            mod: reservation.mod,
+            box: reservation.box,
+          },
+          reason,
+        },
+      },
+    }
   } catch (error) {
     if (transactionOpen) await client.query('ROLLBACK')
     throw error
@@ -327,7 +429,7 @@ export async function cancelReservation(pool, { reservationId, reason }) {
   }
 }
 
-export async function rescheduleReservation(pool, { reservationId, cupoId, reason }) {
+export async function rescheduleReservation(pool, { reservationId, cupoId, reason, actor = defaultActor }) {
   const client = await pool.connect()
   let transactionOpen = false
 
@@ -335,9 +437,13 @@ export async function rescheduleReservation(pool, { reservationId, cupoId, reaso
     await client.query('BEGIN')
     transactionOpen = true
     const found = await client.query(`
-      SELECT id, slot_id, status
-      FROM appointment_reservations
-      WHERE id = $1
+      SELECT r.id, r.slot_id, r.status, r.interconsulta_id,
+             r.centro_solicitante,
+             to_char(s.appointment_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS at,
+             s.doctor, s.establishment AS est, s.modalidad AS mod, s.box
+      FROM appointment_reservations AS r
+      JOIN appointment_slots AS s ON s.id = r.slot_id
+      WHERE r.id = $1
       FOR UPDATE
     `, [reservationId])
 
@@ -377,6 +483,7 @@ export async function rescheduleReservation(pool, { reservationId, cupoId, reaso
       UPDATE appointment_slots
       SET cupos_disponibles = cupos_disponibles - 1, updated_at = NOW()
       WHERE id = $1 AND cupos_disponibles > 0
+        AND appointment_at > LOCALTIMESTAMP
       RETURNING ${slotColumns}
     `, [cupoId])
     if (updated.rowCount === 0) {
@@ -407,10 +514,40 @@ export async function rescheduleReservation(pool, { reservationId, cupoId, reaso
         reservation_id, action, reason, from_slot_id, to_slot_id
       ) VALUES ($1, 'rescheduled', $2, $3, $4)
     `, [reservationId, reason, reservation.slot_id, cupoId])
+    await insertTimelineEvent(client, {
+      interconsultaId: reservation.interconsulta_id,
+      eventType: 'appointment_rescheduled',
+      title: 'Cita reprogramada',
+      details: reason,
+      establishment: updated.rows[0].est,
+      professionalName: updated.rows[0].doctor,
+      actor,
+    })
 
     await client.query('COMMIT')
     transactionOpen = false
-    return { status: 200, data: { reservationId, reason, slot: updated.rows[0] } }
+    return {
+      status: 200,
+      data: {
+        reservationId,
+        reason,
+        slot: updated.rows[0],
+        notification: {
+          action: 'rescheduled',
+          interconsultaId: reservation.interconsulta_id,
+          centroSolicitante: reservation.centro_solicitante,
+          previousSlot: {
+            at: reservation.at,
+            doctor: reservation.doctor,
+            est: reservation.est,
+            mod: reservation.mod,
+            box: reservation.box,
+          },
+          nextSlot: updated.rows[0],
+          reason,
+        },
+      },
+    }
   } catch (error) {
     if (transactionOpen) await client.query('ROLLBACK')
     throw error

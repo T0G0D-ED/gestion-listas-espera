@@ -18,12 +18,12 @@ Se propone el desarrollo de un sistema centralizado de gestión y seguimiento de
 ---
 
 ## Arquitectura
-**Arquitectura Offline-First Dirigida por Eventos (Event-Driven & Local-First Architecture)**
+**Aplicación web con soporte offline acotado**
 
-* **Local-First / Operatividad Offline:** La aplicación prioriza el almacenamiento local (IndexedDB / SQLite local) para que los usuarios puedan continuar trabajando, registrando interconsultas y realizando updates sin importar la calidad del enlace a internet.
-* **Procesamiento Dirigido por Eventos (Event-Driven):** Los cambios de estado (creación de derivación, cambio de prioridad clínica, asignación de cita) se registran como eventos locales.
-* **Mecanismo de Cola y Sincronización:** Al detectar restablecimiento de conectividad, se procesa de manera asíncrona una cola de eventos hacia el backend central, garantizando eventual consistencia de los datos y resolución de conflictos.
-* **Seguridad & Confidencialidad:** Cifrado de datos en tránsito y en reposo local, junto a un esquema de autorización y autenticación basado en roles para asegurar la protección de la información médica.
+* **Frontend:** PWA multipágina servida por Vite, con cola local de reservas pendientes en IndexedDB.
+* **Backend:** API Express que consulta y modifica PostgreSQL central; los hitos unificados se guardan en `interconsulta_timeline_events`.
+* **Sincronización:** Al recuperar conectividad, el navegador intenta enviar las reservas pendientes. La base central aplica las validaciones y puede rechazar conflictos; no hay resolución automática de conflictos ni sincronización de cambios generales.
+* **Alcance de seguridad:** Esta versión de demostración no implementa inicio de sesión, autorización por roles ni cifrado de datos en IndexedDB. No la uses con datos personales o clínicos reales ni la expongas a Internet sin implementar y revisar esos controles.
 
 ---
 
@@ -36,9 +36,11 @@ Se propone el desarrollo de un sistema centralizado de gestión y seguimiento de
 
 ## API y PostgreSQL
 
-La API central expone `GET /api/cupos` para consultar disponibilidad y `POST /api/cupos/reservar` para reservar una plaza. También permite consultar las citas activas con `GET /api/reservas`, reprogramarlas con `PATCH /api/reservas/:id/reprogramar` y cancelarlas con `PATCH /api/reservas/:id/cancelar`. Las reprogramaciones y cancelaciones requieren un motivo; al seleccionar `Otro` también se exige describirlo. Estas operaciones mantienen el historial de cambios y actualizan la disponibilidad dentro de transacciones PostgreSQL.
+La API central expone `GET /api/cupos` para consultar cupos futuros disponibles y `POST /api/cupos/reservar` para reservar una plaza. También permite consultar el historial de citas activas y canceladas con `GET /api/reservas`, reprogramarlas con `PATCH /api/reservas/:id/reprogramar` y cancelarlas con `PATCH /api/reservas/:id/cancelar`. Las reprogramaciones y cancelaciones requieren un motivo; al seleccionar `Otro` también se exige describirlo. Estas operaciones mantienen el historial de cambios y actualizan la disponibilidad dentro de transacciones PostgreSQL.
 
 La lista de espera se consulta con `GET /api/lista-espera` y se registra con `POST /api/lista-espera`, enviando interconsulta, especialidad, centro, motivo y prioridad clínica de 0 a 3. Se ordena por prioridad descendente y, en empate, por antigüedad. Cancelar una cita (`PATCH /api/reservas/:id/cancelar`) la devuelve al final de su nivel de prioridad; reprogramarla (`PATCH /api/reservas/:id/reprogramar`) conserva la cita en el nuevo horario y libera el anterior. Al reservar desde la lista, el registro pasa a `scheduled`.
+
+La línea de tiempo tiene una página propia en `/timeline.html`, enlazada en la navegación entre **Interconsultas** y **Cupos tomados**. Permite consultar una interconsulta por su identificador y usa inicialmente el último ID seleccionado en Interconsultas. La API `GET /api/interconsultas/:id/linea-tiempo` devuelve eventos nuevos de lista de espera y citas, además del historial de reservas, reprogramaciones y cancelaciones. Para las 16 interconsultas de demostración también se crean hitos ficticios de ingreso, revisión y prioridad, identificados en la respuesta con `is_demo: true` y en pantalla como **Datos simulados · demo**. El selector Médico/Administrativo solo cambia el actor de futuras operaciones de prueba: ambos perfiles ven lo mismo y el selector no es autenticación ni autorización. No usar esta funcionalidad con datos reales hasta integrar identidad institucional, permisos en el servidor y eventos clínicos verificados.
 
 Para iniciar el backend local:
 
@@ -70,7 +72,7 @@ npm run db:migrate
 npm run db:seed
 ```
 
-Si ya tenías instalada una versión anterior, vuelve a ejecutar `npm run db:migrate` para añadir el estado de las citas y el historial de reprogramaciones/cancelaciones.
+Si ya tenías instalada una versión anterior, vuelve a ejecutar `npm run db:migrate` para crear el historial unificado de la línea de tiempo y cargar sus hitos de demostración.
 
 Inicia el backend en una ventana de PowerShell y déjala abierta:
 

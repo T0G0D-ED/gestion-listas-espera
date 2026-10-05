@@ -12,6 +12,13 @@ import {
   getReservas,
   reservarCupo,
 } from '../services/api.js'
+import {
+  enqueueReservation,
+  getPendingSyncOperations,
+  getPendingSyncCount,
+  removePendingSyncOperation,
+  subscribeToSyncQueueCount,
+} from '../services/syncQueue.js'
 import { downloadReceiptPdf } from '../services/receipt.js'
 
 document.querySelector('#app').innerHTML = appTemplate
@@ -32,6 +39,11 @@ const state = {
   reservationError: null,
   reservations: [],
   reservationsError: null,
+  pendingOperations: [],
+  pendingCount: 0,
+  queueError: null,
+  syncError: null,
+  syncingQueue: false,
 }
 const exampleReferralIds = Array.from({ length: 16 }, (_, index) =>
   `IC-2026-${String(184 + index).padStart(6, '0')}`,
@@ -63,11 +75,74 @@ async function load() {
     state.reservations = []
     state.reservationsError = error.message
   }
+  await refreshPendingOperations()
   renderSync(); renderReferralContext(); populateEstablecimientos(); applyFilters();
 }
 const online = () => navigator.onLine;
+async function refreshPendingOperations(count) {
+  try {
+    state.pendingOperations = await getPendingSyncOperations()
+    state.pendingCount = Number.isInteger(count)
+      ? count
+      : await getPendingSyncCount()
+    state.queueError = null
+  } catch (error) {
+    state.pendingOperations = []
+    state.pendingCount = null
+    state.queueError = error.message
+  }
+  renderPendingCount()
+}
+subscribeToSyncQueueCount(count => {
+  void refreshPendingOperations(count).then(() => {
+    renderReferralContext()
+    renderPanel()
+  })
+})
+async function syncPendingReservations() {
+  if (!online() || state.syncingQueue) return
+  state.syncingQueue = true
+  let didSync = false
+  try {
+    const operations = await getPendingSyncOperations()
+    state.syncError = null
+    for (const operation of operations) {
+      if (operation.type !== 'reservation') continue
+      try {
+        await reservarCupo(operation.payload)
+        await removePendingSyncOperation(operation.id)
+        didSync = true
+      } catch (error) {
+        state.syncError = error.message
+      }
+    }
+    await refreshPendingOperations()
+    if (didSync) await load()
+  } catch (error) {
+    state.syncError = error.message
+    await refreshPendingOperations()
+  } finally {
+    state.syncingQueue = false
+    renderPendingCount()
+  }
+}
+function renderPendingCount() {
+  const counter = $('#pending-sync-count')
+  counter.textContent = state.pendingCount === null ? '—' : String(state.pendingCount)
+  counter.title = state.queueError || ''
+  const message = $('#sync-queue-message')
+  message.textContent = state.queueError
+    ? `No se pudo leer la cola local: ${state.queueError}`
+    : state.syncError
+      ? `Hay operaciones pendientes: ${state.syncError}`
+      : ''
+  message.hidden = !message.textContent
+}
 function renderReferralContext(message = '') {
-  const reservedIds = new Set(state.reservations.map(reservation => reservation.interconsultaId))
+  const reservedIds = new Set([
+    ...state.reservations.map(reservation => reservation.interconsultaId),
+    ...state.pendingOperations.map(operation => operation.payload.interconsultaId),
+  ])
   const nextId = findNextReferralId(reservedIds)
   $('#current-referral-id').textContent = interconsultaId
   $('#next-referral').disabled = !nextId || Boolean(state.reservationsError)
@@ -95,7 +170,10 @@ function renderSync() {
   $('#offline-banner').hidden = online();
   renderPanel();
 }
-addEventListener('online', () => { renderSync(); load(); });
+addEventListener('online', () => {
+  renderSync()
+  void load().then(syncPendingReservations)
+})
 addEventListener('offline', renderSync);
 $('#refresh').addEventListener('click', load);
 $('#next-referral').addEventListener('click', () => {
@@ -167,11 +245,16 @@ function renderPanel() {
   const existingReservation = state.reservations.find(item =>
     item.interconsultaId === interconsultaId,
   )
+  const pendingReservation = state.pendingOperations.find(operation =>
+    operation.type === 'reservation'
+    && operation.payload.interconsultaId === interconsultaId,
+  )
   $('#panel').innerHTML = renderSelectionPanel({
     slot,
     online: online(),
     confirmed: state.confirmed,
     existingReservation,
+    pendingReservation,
     reservationCheckError: state.reservationsError,
     timeFormat: tf,
     longDate: long,
@@ -214,17 +297,25 @@ $('#list').addEventListener('click', e => {
 $('#pager').addEventListener('click', e => { const n = e.target.dataset.page; if (n) { state.page = +n; renderList(); } });
 $('#panel').addEventListener('click', async e => {
   if (e.target.id === 'change') { state.selectedId = null; store.set('selectedId', null); renderList(); }
-  if (e.target.id === 'confirm' && online()) {
+  if (e.target.id === 'confirm') {
     const slot = state.slots.find(item => item.id === state.selectedId)
     if (!slot) return
     e.target.disabled = true; e.target.textContent = 'Confirmando…';
     state.reservationError = null
+    const reservation = {
+      cupoId: slot.id,
+      interconsultaId,
+      centroSolicitante: 'CESFAM Nuevo Horizonte',
+    }
     try {
-      const result = await reservarCupo({
-        cupoId: slot.id,
-        interconsultaId,
-        centroSolicitante: 'CESFAM Nuevo Horizonte',
-      })
+      if (!online()) {
+        await enqueueReservation(reservation)
+        await refreshPendingOperations()
+        renderReferralContext()
+        renderList()
+        return
+      }
+      const result = await reservarCupo(reservation)
       const updatedSlot = { ...slot, ...result.data.slot }
       state.slots = state.slots.map(item => item.id === slot.id ? updatedSlot : item)
       try {
@@ -247,4 +338,4 @@ $('#panel').addEventListener('click', async e => {
 });
 
 registerSW({ immediate: true })
-load();
+void load().then(syncPendingReservations)

@@ -1,10 +1,15 @@
 const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
 async function request(path, options = {}) {
+  let demoProfile = 'administrativo'
+  try {
+    demoProfile = localStorage.getItem('demoProfile') || demoProfile
+  } catch {}
   const response = await fetch(`${apiBase}${path}`, {
     ...options,
     headers: {
       ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      'X-Demo-Profile': demoProfile,
       ...options.headers,
     },
   })
@@ -17,6 +22,17 @@ async function request(path, options = {}) {
   }
 
   return payload
+}
+
+export async function getInterconsultaTimeline(interconsultaId) {
+  const result = await request(
+    `/api/interconsultas/${encodeURIComponent(interconsultaId)}/linea-tiempo`,
+    { cache: 'no-store' },
+  )
+  if (!Array.isArray(result.data)) {
+    throw new Error('La API no devolvió el historial de la interconsulta.')
+  }
+  return result.data
 }
 
 export async function getCupos() {
@@ -42,7 +58,16 @@ export async function reservarCupo({
 
 export async function getReservas() {
   const result = await request('/api/reservas', { cache: 'no-store' })
-  return result.data
+  if (!Array.isArray(result.data)) {
+    throw new Error('La API no devolvió la lista de citas tomadas.')
+  }
+  return result.data.map(reservation => ({
+    ...reservation,
+    reservationId: reservation.reservationId ?? reservation.reservation_id,
+    cupoId: reservation.cupoId ?? reservation.slot_id,
+    interconsultaId: reservation.interconsultaId ?? reservation.interconsulta_id,
+    centroSolicitante: reservation.centroSolicitante ?? reservation.centro_solicitante,
+  }))
 }
 
 export async function getListaEspera() {
@@ -57,38 +82,22 @@ export async function agregarAListaEspera({ interconsultaId, especialidad, centr
   })
 }
 
-export async function cancelarReserva(reservationId, motivo) {
-  return request(`/api/reservas/${encodeURIComponent(reservationId)}/cancelar`, {
-    method: 'PATCH',
-    body: JSON.stringify({ motivo }),
-  })
-}
-
-export async function reprogramarReserva(reservationId, cupoId, motivo) {
+export async function reprogramarReserva(reservationId, reason, motivo) {
+  const details = typeof reason === 'object' && reason !== null
+    ? reason
+    : { cupoId: reason, motivo }
   return request(`/api/reservas/${encodeURIComponent(reservationId)}/reprogramar`, {
     method: 'PATCH',
-    body: JSON.stringify({ cupoId, motivo }),
+    body: JSON.stringify(details),
   })
 }
 
-export async function getReservas() {
-  const result = await request('/api/reservas', { cache: 'no-store' })
-  if (!Array.isArray(result.data)) {
-    throw new Error('La API no devolvió la lista de citas tomadas.')
-  }
-  return result.data
-}
-
-export async function reprogramarReserva(reservationId, { cupoId, motivo, otroMotivo }) {
-  return request(`/api/reservas/${encodeURIComponent(reservationId)}/reprogramar`, {
-    method: 'PATCH',
-    body: JSON.stringify({ cupoId, motivo, otroMotivo }),
-  })
-}
-
-export async function cancelarReserva(reservationId, { motivo, otroMotivo }) {
+export async function cancelarReserva(reservationId, reason, otroMotivo) {
+  const details = typeof reason === 'object' && reason !== null
+    ? reason
+    : { motivo: reason, otroMotivo }
   return request(`/api/reservas/${encodeURIComponent(reservationId)}/cancelar`, {
     method: 'PATCH',
-    body: JSON.stringify({ motivo, otroMotivo }),
+    body: JSON.stringify(details),
   })
 }

@@ -34,14 +34,19 @@ ALTER TABLE appointment_reservations
   ADD COLUMN IF NOT EXISTS prioridad_clinica SMALLINT NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
-DO $$
-BEGIN
-  ALTER TABLE appointment_reservations
-    ADD CONSTRAINT appointment_reservations_status_check
-    CHECK (status IN ('active', 'cancelled'));
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
+ALTER TABLE appointment_reservations
+  ALTER COLUMN status SET DEFAULT 'active';
+
+UPDATE appointment_reservations
+SET status = 'active'
+WHERE status = 'reserved';
+
+ALTER TABLE appointment_reservations
+  DROP CONSTRAINT IF EXISTS appointment_reservations_status_check;
+
+ALTER TABLE appointment_reservations
+  ADD CONSTRAINT appointment_reservations_status_check
+  CHECK (status IN ('active', 'cancelled'));
 
 CREATE TABLE IF NOT EXISTS appointment_reservation_events (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -66,6 +71,26 @@ CREATE TABLE IF NOT EXISTS appointment_waitlist (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS interconsulta_timeline_events (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  interconsulta_id TEXT NOT NULL,
+  event_type TEXT NOT NULL CHECK (
+    event_type IN (
+      'created', 'reviewed', 'priority_changed', 'waitlisted',
+      'appointment_reserved', 'appointment_rescheduled', 'appointment_cancelled'
+    )
+  ),
+  title TEXT NOT NULL,
+  details TEXT NOT NULL DEFAULT '',
+  establishment TEXT NOT NULL,
+  professional_name TEXT,
+  actor_name TEXT NOT NULL,
+  actor_role TEXT NOT NULL CHECK (actor_role IN ('medico', 'administrativo', 'sistema')),
+  event_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  source_key TEXT UNIQUE,
+  is_demo BOOLEAN NOT NULL DEFAULT FALSE
+);
+
 INSERT INTO appointment_reservation_events (reservation_id, action, reason, to_slot_id)
 SELECT r.id, 'reserved', 'Reserva registrada antes del historial', r.slot_id
 FROM appointment_reservations AS r
@@ -75,11 +100,68 @@ WHERE NOT EXISTS (
   WHERE event.reservation_id = r.id
 );
 
+INSERT INTO interconsulta_timeline_events (
+  interconsulta_id, event_type, title, details, establishment,
+  professional_name, actor_name, actor_role, event_at, source_key
+)
+SELECT
+  r.interconsulta_id,
+  CASE event.action
+    WHEN 'reserved' THEN 'appointment_reserved'
+    WHEN 'rescheduled' THEN 'appointment_rescheduled'
+    WHEN 'cancelled' THEN 'appointment_cancelled'
+  END,
+  CASE event.action
+    WHEN 'reserved' THEN 'Cupo asignado'
+    WHEN 'rescheduled' THEN 'Cita reprogramada'
+    WHEN 'cancelled' THEN 'Cita cancelada'
+  END,
+  event.reason,
+  COALESCE(to_slot.establishment, from_slot.establishment, r.centro_solicitante),
+  COALESCE(to_slot.doctor, from_slot.doctor),
+  'Sistema (evento histórico)',
+  'sistema',
+  event.created_at,
+  'reservation-event:' || event.id::text
+FROM appointment_reservation_events AS event
+JOIN appointment_reservations AS r ON r.id = event.reservation_id
+LEFT JOIN appointment_slots AS to_slot ON to_slot.id = event.to_slot_id
+LEFT JOIN appointment_slots AS from_slot ON from_slot.id = event.from_slot_id
+ON CONFLICT (source_key) DO NOTHING;
+
+INSERT INTO interconsulta_timeline_events (
+  interconsulta_id, event_type, title, details, establishment,
+  professional_name, actor_name, actor_role, event_at, source_key, is_demo
+)
+SELECT
+  'IC-2026-' || LPAD((183 + sample_id.number)::text, 6, '0'),
+  sample.event_type,
+  sample.title,
+  sample.details,
+  'CESFAM Nuevo Horizonte',
+  CASE WHEN sample.event_type = 'reviewed' THEN 'Dra. Camila Rojas' ELSE NULL END,
+  sample.actor_name,
+  sample.actor_role,
+  NOW() - sample.days_ago * INTERVAL '1 day',
+  'demo:' || sample_id.number::text || ':' || sample.event_type,
+  TRUE
+FROM generate_series(1, 16) AS sample_id(number)
+CROSS JOIN (VALUES
+  ('created', 'Interconsulta creada', 'Ingreso de ejemplo al sistema.', 'Equipo CESFAM Nuevo Horizonte', 'administrativo', 90),
+  ('reviewed', 'Interconsulta revisada', 'Revisión inicial de antecedentes registrada en el prototipo.', 'Dra. Camila Rojas', 'medico', 65),
+  ('priority_changed', 'Prioridad clínica actualizada', 'Prioridad de ejemplo actualizada durante la revisión.', 'Dra. Camila Rojas', 'medico', 45)
+) AS sample(event_type, title, details, actor_name, actor_role, days_ago)
+ON CONFLICT (source_key) DO NOTHING;
+
 CREATE INDEX IF NOT EXISTS appointment_slots_at_idx
   ON appointment_slots (appointment_at);
 
 CREATE INDEX IF NOT EXISTS appointment_reservations_status_idx
   ON appointment_reservations (status, reserved_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS appointment_reservations_one_active_per_referral_idx
+  ON appointment_reservations (interconsulta_id)
+  WHERE status = 'active';
 
 CREATE INDEX IF NOT EXISTS appointment_reservation_events_reservation_idx
   ON appointment_reservation_events (reservation_id, created_at DESC);
@@ -87,3 +169,6 @@ CREATE INDEX IF NOT EXISTS appointment_reservation_events_reservation_idx
 CREATE INDEX IF NOT EXISTS appointment_waitlist_priority_fifo_idx
   ON appointment_waitlist (prioridad_clinica DESC, entered_at ASC, id ASC)
   WHERE status = 'waiting';
+
+CREATE INDEX IF NOT EXISTS interconsulta_timeline_events_referral_idx
+  ON interconsulta_timeline_events (interconsulta_id, event_at DESC, id DESC);

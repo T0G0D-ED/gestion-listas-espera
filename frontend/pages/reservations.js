@@ -4,7 +4,7 @@ import '@fontsource/inter/latin-600.css'
 import '@fontsource/inter/latin-700.css'
 import '../assets/style.css'
 import { registerSW } from 'virtual:pwa-register'
-import { headerTemplate } from '../components/Header.js'
+import { renderHeader } from '../components/Header.js'
 import {
   renderReservationActionDialog,
   renderReservationsList,
@@ -19,7 +19,7 @@ import {
 } from '../services/api.js'
 
 document.querySelector('#app').innerHTML = `
-  ${headerTemplate}
+  ${renderHeader('reservas')}
   <main class="mx-auto max-w-6xl px-4 py-6">
     <section id="reservations-page" class="rounded-xl border border-slate-200 bg-white" aria-labelledby="reservations-title"></section>
   </main>
@@ -95,7 +95,7 @@ async function loadReservations() {
   renderPage()
   try {
     const [reservations, slots] = await Promise.all([getReservas(), getCupos()])
-    state.reservations = reservations
+    state.reservations = reservations.filter(reservation => reservation.status === 'active')
     state.slots = slots
     state.lastSync = new Date().toISOString()
     localStorage.setItem('lastSync', JSON.stringify(state.lastSync))

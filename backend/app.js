@@ -5,6 +5,7 @@ import {
   addToWaitlist,
   listReservations,
   listSlots,
+  listTimelineEvents,
   listWaitlist,
   reserveSlot,
   rescheduleReservation,
@@ -21,6 +22,24 @@ const defaultOrigins = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
 ]
+
+function validReservationId(value) {
+  return /^\d+$/.test(value)
+}
+
+function getDemoActor(req) {
+  return req.get('x-demo-profile') === 'medico'
+    ? { name: 'Dra. Camila Rojas (perfil de desarrollo)', role: 'medico' }
+    : { name: 'María Fernández (perfil de desarrollo)', role: 'administrativo' }
+}
+
+function getReason(body = {}) {
+  const { motivo, otroMotivo } = body
+  if (typeof motivo !== 'string' || !motivo.trim()) return null
+  if (motivo.trim() !== 'Otro') return motivo.trim()
+  if (typeof otroMotivo !== 'string' || !otroMotivo.trim()) return null
+  return `Otro: ${otroMotivo.trim()}`
+}
 
 function databaseError(res, error) {
   console.error('Error de base de datos:', error.message)
@@ -101,6 +120,23 @@ export function createApp(pool, { notify = sendAppointmentNotification } = {}) {
     }
   })
 
+  app.get('/api/interconsultas/:id/linea-tiempo', async (req, res) => {
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(req.params.id)) {
+      return res.status(400).json({ error: 'El identificador de interconsulta no es válido.' })
+    }
+    try {
+      const data = await listTimelineEvents(pool, req.params.id)
+      return res.json({
+        interconsultaId: req.params.id,
+        data,
+        includesDemoEvents: data.some(event => event.is_demo),
+        accessMode: 'prototipo-sin-autenticacion',
+      })
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
   app.post('/api/lista-espera', async (req, res) => {
     const { interconsultaId, especialidad, centroSolicitante, prioridadClinica, motivo } = req.body ?? {}
     if (![interconsultaId, especialidad, centroSolicitante, motivo].every(value =>
@@ -118,6 +154,7 @@ export function createApp(pool, { notify = sendAppointmentNotification } = {}) {
         centroSolicitante: centroSolicitante.trim(),
         prioridadClinica,
         reason: motivo.trim(),
+        actor: getDemoActor(req),
       })
       const { status, ...body } = result
       return res.status(status).json(body)
@@ -150,43 +187,7 @@ export function createApp(pool, { notify = sendAppointmentNotification } = {}) {
         centroSolicitante: centroSolicitante.trim(),
         especialidad: especialidad.trim(),
         prioridadClinica,
-      })
-      const { status, ...body } = result
-      return res.status(status).json(body)
-    } catch (error) {
-      return databaseError(res, error)
-    }
-  })
-
-  app.patch('/api/reservas/:id/cancelar', async (req, res) => {
-    const reservationId = req.params.id
-    const { motivo } = req.body ?? {}
-    if (!/^\d+$/.test(reservationId) || typeof motivo !== 'string' || !motivo.trim()) {
-      return res.status(400).json({ error: 'Selecciona un motivo para cancelar la cita.' })
-    }
-
-    try {
-      const result = await cancelReservation(pool, { reservationId, reason: motivo.trim() })
-      const { status, ...body } = result
-      return res.status(status).json(body)
-    } catch (error) {
-      return databaseError(res, error)
-    }
-  })
-
-  app.patch('/api/reservas/:id/reprogramar', async (req, res) => {
-    const reservationId = req.params.id
-    const { cupoId, motivo } = req.body ?? {}
-    if (!/^\d+$/.test(reservationId) || typeof cupoId !== 'string' || !cupoId.trim()
-      || typeof motivo !== 'string' || !motivo.trim()) {
-      return res.status(400).json({ error: 'Selecciona un nuevo horario y un motivo para reprogramar.' })
-    }
-
-    try {
-      const result = await rescheduleReservation(pool, {
-        reservationId,
-        cupoId: cupoId.trim(),
-        reason: motivo.trim(),
+        actor: getDemoActor(req),
       })
       if (result.data?.notification) {
         result.data.notification = await deliverNotification(result.data.notification, notify)
@@ -215,6 +216,7 @@ export function createApp(pool, { notify = sendAppointmentNotification } = {}) {
         reservationId: req.params.id,
         cupoId: cupoId.trim(),
         reason,
+        actor: getDemoActor(req),
       })
       if (result.data?.notification) {
         result.data.notification = await deliverNotification(result.data.notification, notify)
@@ -241,6 +243,7 @@ export function createApp(pool, { notify = sendAppointmentNotification } = {}) {
       const result = await cancelReservation(pool, {
         reservationId: req.params.id,
         reason,
+        actor: getDemoActor(req),
       })
       if (result.data?.notification) {
         result.data.notification = await deliverNotification(result.data.notification, notify)

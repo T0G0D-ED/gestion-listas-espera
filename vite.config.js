@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
@@ -16,6 +17,14 @@ export default defineConfig({
   publicDir: 'data',
   server: { proxy: apiProxy },
   preview: { proxy: apiProxy },
+  build: {
+    rollupOptions: {
+      input: {
+        index: fileURLToPath(new URL('./frontend/index.html', import.meta.url)),
+        gestionar: fileURLToPath(new URL('./frontend/gestionar.html', import.meta.url)),
+      },
+    },
+  },
   plugins: [
     tailwindcss(),
     {

@@ -38,6 +38,8 @@ Se propone el desarrollo de un sistema centralizado de gestión y seguimiento de
 
 La API central expone `GET /api/cupos` para consultar disponibilidad y `POST /api/cupos/reservar` para reservar una plaza. La reserva se ejecuta en una transacción PostgreSQL: la disponibilidad se decrementa solo si todavía es mayor que cero, y una interconsulta solo puede tener una reserva en toda la red.
 
+La lista de espera se consulta con `GET /api/lista-espera` y se registra con `POST /api/lista-espera`, enviando interconsulta, especialidad, centro, motivo y prioridad clínica de 0 a 3. Se ordena por prioridad descendente y, en empate, por antigüedad. Cancelar una cita (`PATCH /api/reservas/:id/cancelar`) la devuelve al final de su nivel de prioridad; reprogramarla (`PATCH /api/reservas/:id/reprogramar`) conserva la cita en el nuevo horario y libera el anterior. Al reservar desde la lista, el registro pasa a `scheduled`.
+
 Para iniciar el backend local:
 
 1. Copia `.env.example` a `.env` y configura `DATABASE_URL` con la conexión PostgreSQL entregada para el proyecto.

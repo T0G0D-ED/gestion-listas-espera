@@ -39,6 +39,12 @@ function createFakePool(initialAvailability) {
             return { rows: [], rowCount: 0 }
           }
 
+          if (statement.startsWith('SELECT ID, SLOT_ID, STATUS FROM APPOINTMENT_RESERVATIONS')) {
+            const existing = reservations.get(values[0])
+            const rows = existing ? [{ id: existing.id, slot_id: existing.slotId, status: existing.status }] : []
+            return { rows, rowCount: rows.length }
+          }
+
           if (statement.startsWith('UPDATE APPOINTMENT_SLOTS')) {
             if (slot.id !== values[0] || slot.cupos_disponibles < 1) {
               return { rows: [], rowCount: 0 }
@@ -62,11 +68,24 @@ function createFakePool(initialAvailability) {
               throw Object.assign(new Error('duplicate interconsulta'), { code: '23505' })
             }
             insertedReservation = interconsultaId
-            reservations.set(interconsultaId, { slotId, center })
+            reservations.set(interconsultaId, {
+              id: nextReservationId,
+              slotId,
+              center,
+              status: 'active',
+            })
             return {
               rows: [{ id: nextReservationId++, reserved_at: new Date().toISOString() }],
               rowCount: 1,
             }
+          }
+
+          if (statement.startsWith('INSERT INTO APPOINTMENT_RESERVATION_EVENTS')) {
+            return { rows: [], rowCount: 1 }
+          }
+
+          if (statement.startsWith('UPDATE APPOINTMENT_WAITLIST')) {
+            return { rows: [], rowCount: 1 }
           }
 
           if (statement === 'ROLLBACK') {

@@ -68,19 +68,20 @@ test('cancellation remains successful and reports Resend delivery failure', asyn
   const pool = {
     async connect() {
       return {
-        async query(sql) {
+        async query(sql, values = []) {
           const statement = sql.replace(/\s+/g, ' ').trim().toUpperCase()
           if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(statement)) {
             return { rows: [], rowCount: 0 }
           }
-          if (statement.startsWith('SELECT R.ID, R.SLOT_ID, R.INTERCONSULTA_ID')) {
+          if (statement.startsWith('SELECT R.ID, R.SLOT_ID, R.STATUS, R.INTERCONSULTA_ID')) {
             return {
               rows: [{
+                ...slot,
                 id: '1',
                 slot_id: slot.id,
+                status: 'active',
                 interconsulta_id: 'IC-2026-000184',
                 centro_solicitante: 'CESFAM de prueba',
-                ...slot,
               }],
               rowCount: 1,
             }
@@ -121,12 +122,16 @@ test('reservation sends a test email and returns its delivery status', async t =
     box: 'Box 2',
     cupos: 0,
   }
+  let timelineEventValues
   const pool = {
     async connect() {
       return {
-        async query(sql) {
+        async query(sql, values = []) {
           const statement = sql.replace(/\s+/g, ' ').trim().toUpperCase()
           if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(statement)) {
+            return { rows: [], rowCount: 0 }
+          }
+          if (statement.startsWith('SELECT ID, SLOT_ID, STATUS FROM APPOINTMENT_RESERVATIONS')) {
             return { rows: [], rowCount: 0 }
           }
           if (statement.startsWith('UPDATE APPOINTMENT_SLOTS')) {
@@ -137,6 +142,14 @@ test('reservation sends a test email and returns its delivery status', async t =
               rows: [{ id: '42', reserved_at: '2026-10-05T10:00:00Z' }],
               rowCount: 1,
             }
+          }
+          if (statement.startsWith('INSERT INTO INTERCONSULTA_TIMELINE_EVENTS')) {
+            timelineEventValues = values
+            return { rows: [], rowCount: 1 }
+          }
+          if (statement.startsWith('INSERT INTO APPOINTMENT_RESERVATION_EVENTS') ||
+              statement.startsWith('UPDATE APPOINTMENT_WAITLIST')) {
+            return { rows: [], rowCount: 1 }
           }
           throw new Error(`Unexpected query: ${statement}`)
         },
@@ -153,7 +166,7 @@ test('reservation sends a test email and returns its delivery status', async t =
   })
   const response = await fetch(`${baseUrl}/api/cupos/reservar`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Demo-Profile': 'medico' },
     body: JSON.stringify({
       cupoId: 'slot-1',
       interconsultaId: 'IC-2026-000184',
@@ -167,4 +180,48 @@ test('reservation sends a test email and returns its delivery status', async t =
   assert.equal(notified.interconsultaId, 'IC-2026-000184')
   assert.equal(payload.data.notification.sent, true)
   assert.equal(payload.data.notification.recipient, 'test@example.com')
+  assert.equal(timelineEventValues[4], 'Hospital de prueba')
+  assert.equal(timelineEventValues[5], 'Dra. Prueba')
+  assert.equal(timelineEventValues[6], 'Dra. Camila Rojas (perfil de desarrollo)')
+  assert.equal(timelineEventValues[7], 'medico')
+})
+
+test('timeline endpoint returns events, marks demo data, and uses the referral ID filter', async t => {
+  const event = {
+    id: '1',
+    interconsulta_id: 'IC-2026-000184',
+    event_type: 'created',
+    title: 'Interconsulta creada',
+    details: 'Ingreso de ejemplo.',
+    establishment: 'CESFAM Nuevo Horizonte',
+    professional_name: null,
+    actor_name: 'Equipo de ejemplo',
+    actor_role: 'administrativo',
+    event_at: '2026-01-01T10:00:00.000Z',
+    is_demo: true,
+  }
+  let parameters
+  const baseUrl = await startTestServer(t, {
+    async query(sql, values) {
+      assert.match(sql, /ORDER BY event_at ASC, id ASC/)
+      parameters = values
+      return { rows: [event], rowCount: 1 }
+    },
+  })
+  const response = await fetch(`${baseUrl}/api/interconsultas/IC-2026-000184/linea-tiempo`)
+  const payload = await response.json()
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(parameters, ['IC-2026-000184'])
+  assert.equal(payload.interconsultaId, 'IC-2026-000184')
+  assert.equal(payload.includesDemoEvents, true)
+  assert.equal(payload.accessMode, 'prototipo-sin-autenticacion')
+  assert.deepEqual(payload.data, [event])
+})
+
+test('timeline endpoint rejects malformed referral IDs', async t => {
+  const baseUrl = await startTestServer(t)
+  const response = await fetch(`${baseUrl}/api/interconsultas/%3Cscript%3E/linea-tiempo`)
+
+  assert.equal(response.status, 400)
 })

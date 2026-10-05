@@ -30,7 +30,25 @@ const store = {
   get: (k, d = null) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
-const state = { slots: [], filtered: [], page: 1, per: 4, selectedId: store.get('selectedId'), confirmed: store.get('confirmed'), loadError: null, reservationError: null, existingReservation: false };
+const exampleReferralIds = Array.from({ length: 16 }, (_, index) =>
+  `IC-2026-${String(184 + index).padStart(6, '0')}`,
+)
+let interconsultaId = store.get('interconsultaId', exampleReferralIds[0])
+const state = {
+  slots: [],
+  filtered: [],
+  reservations: [],
+  reservationsError: null,
+  pendingOperations: [],
+  pendingCount: 0,
+  page: 1,
+  per: 4,
+  selectedId: store.get('selectedId'),
+  confirmed: store.get('confirmed'),
+  loadError: null,
+  reservationError: null,
+  existingReservation: false,
+}
 
 const dtf = new Intl.DateTimeFormat('es-CL', { weekday: 'short', day: '2-digit', month: 'short' });
 const tf  = new Intl.DateTimeFormat('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -48,7 +66,7 @@ async function load() {
     state.loadError = error.message;
   }
   try {
-    state.reservations = await getReservas()
+    state.reservations = (await getReservas()).filter(reservation => reservation.status === 'active')
     state.reservationsError = null
   } catch (error) {
     state.reservations = []
@@ -209,6 +227,8 @@ $('#next-referral').addEventListener('click', () => {
   }
   interconsultaId = nextId
   store.set('interconsultaId', interconsultaId)
+  state.selectedId = null
+  store.set('selectedId', null)
   state.confirmed = null
   state.reservationError = null
   store.set('confirmed', null)
@@ -224,8 +244,9 @@ function populateEstablecimientos() {
 }
 function applyFilters() {
   const f = Object.fromEntries(new FormData($('#filters')));
+  const now = Date.now()
   state.filtered = state.slots
-    .filter(s => s.cupos > 0 && (!f.est || s.est === f.est) && (!f.mod || s.mod === f.mod)
+    .filter(s => new Date(s.at).getTime() > now && s.cupos > 0 && (!f.est || s.est === f.est) && (!f.mod || s.mod === f.mod)
       && (!f.desde || s.at.slice(0, 10) >= f.desde) && (!f.hasta || s.at.slice(0, 10) <= f.hasta))
     .sort((a, b) => a.at.localeCompare(b.at));
   state.page = 1; renderList();
@@ -260,7 +281,7 @@ function row(s) {
     <span class="text-sm"><b class="block">${s.doctor}</b><span class="text-xs text-slate-500">Traumatología adulto</span></span>
     <span class="hidden md:block text-sm"><b class="block">${s.est}</b><span class="text-xs text-slate-500">${s.comuna} · Red Sur</span></span>
     <span class="hidden md:inline text-xs border rounded-full px-2 py-0.5 ${s.mod === 'Teleatención' ? 'bg-sky-50 border-sky-200 text-sky-800' : 'bg-slate-50 border-slate-200'}">${s.mod}</span>
-    <span class="hidden md:block text-xs"><b class="text-emerald-700 block">${s.cupos} ${s.cupos > 1 ? 'cupos' : 'cupo'}</b><span class="text-slate-500">${s.min} min</span></span>
+    <span class="hidden md:block text-xs"><b class="text-emerald-700 block">${s.cupos} ${s.cupos > 1 ? 'cupos' : 'cupo'}</b><span class="text-slate-500">${Number.isFinite(s.min) ? `${s.min} min` : 'Traslado no informado'}</span></span>
     <span class="text-sm font-medium rounded-lg px-3 py-1.5 border ${sel ? 'bg-brand text-white border-brand' : 'border-brand text-brand'}">${sel ? 'Elegido' : 'Elegir'}</span>
   </button></li>`;
 }

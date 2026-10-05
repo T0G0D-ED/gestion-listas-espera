@@ -21,9 +21,11 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: fileURLToPath(new URL('./frontend/index.html', import.meta.url)),
+        devueltas: fileURLToPath(new URL('./frontend/devueltas.html', import.meta.url)),
         gestionar: fileURLToPath(new URL('./frontend/gestionar.html', import.meta.url)),
         timeline: fileURLToPath(new URL('./frontend/timeline.html', import.meta.url)),
         reservas: fileURLToPath(new URL('./frontend/reservas.html', import.meta.url)),
+        asistencia: fileURLToPath(new URL('./frontend/asistencia.html', import.meta.url)),
       },
     },
   },

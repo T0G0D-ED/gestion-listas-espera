@@ -3,15 +3,29 @@ import express from 'express'
 import {
   cancelReservation,
   addToWaitlist,
+  getAttendanceRequest,
   listReservations,
   listSlots,
   listTimelineEvents,
+  listAuditableReferrals,
+  listReturnedReferrals,
   listWaitlist,
   reserveSlot,
+  resubmitReturnedInterconsulta,
+  reviewInterconsulta,
   rescheduleReservation,
+  respondToAttendance,
 } from './cuposRepository.js'
-import { sendAppointmentNotification } from './resendNotifications.js'
-import { demoPatients, findDemoPatientByRut, isRutFormatValid } from './demoPatients.js'
+import {
+  sendAppointmentNotification,
+  sendReferralReturnNotification,
+} from './resendNotifications.js'
+import {
+  demoInterconsultaIds,
+  demoPatients,
+  findDemoPatientByRut,
+  isRutFormatValid,
+} from './demoPatients.js'
 
 const defaultOrigins = [
   'http://localhost:4173',
@@ -30,8 +44,18 @@ function validReservationId(value) {
 
 function getDemoActor(req) {
   return req.get('x-demo-profile') === 'medico'
-    ? { name: 'Dra. Camila Rojas (perfil de desarrollo)', role: 'medico' }
+    ? { name: 'Dr. Kosme Fulanito (perfil de desarrollo)', role: 'medico' }
     : { name: 'María Fernández (perfil de desarrollo)', role: 'administrativo' }
+}
+
+function requireDemoRole(req, res, role) {
+  if (req.get('x-demo-profile') === role) return true
+  res.status(403).json({ error: 'Esta operación no está disponible para el perfil seleccionado.' })
+  return false
+}
+
+function validDemoReferralId(value) {
+  return demoInterconsultaIds.includes(value)
 }
 
 function getReason(body = {}) {
@@ -69,7 +93,22 @@ async function deliverNotification(notification, notify) {
   }
 }
 
-export function createApp(pool, { notify = sendAppointmentNotification } = {}) {
+async function deliverReferralReturnNotification(notification, notify) {
+  try {
+    return await notify(notification)
+  } catch (error) {
+    console.error('No se pudo enviar el aviso de devolución por Resend:', error.message)
+    return {
+      sent: false,
+      error: 'La interconsulta se devolvió, pero no se pudo enviar el correo de prueba. Revisa la configuración de Resend.',
+    }
+  }
+}
+
+export function createApp(pool, {
+  notify = sendAppointmentNotification,
+  notifyReferralReturn = sendReferralReturnNotification,
+} = {}) {
   const app = express()
   const configuredOrigins = (process.env.FRONTEND_ORIGINS || '')
     .split(',')
@@ -103,10 +142,44 @@ export function createApp(pool, { notify = sendAppointmentNotification } = {}) {
     }
   })
 
-  app.get('/api/reservas', async (_req, res) => {
+  app.get('/api/reservas', async (req, res) => {
     try {
-      const data = await listReservations(pool)
+      const interconsultaIds = req.get('x-demo-profile') === 'medico' ? demoInterconsultaIds : null
+      const data = await listReservations(pool, { interconsultaIds })
       return res.json({ total: data.length, data })
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
+  app.get('/api/citas/asistencia/:token', async (req, res) => {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(req.params.token)) {
+      return res.status(400).json({ error: 'El enlace de respuesta no es válido.' })
+    }
+    try {
+      const result = await getAttendanceRequest(pool, req.params.token)
+      const { status, ...body } = result
+      return res.status(status).json(body)
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
+  app.post('/api/citas/asistencia/:token', async (req, res) => {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(req.params.token)) {
+      return res.status(400).json({ error: 'El enlace de respuesta no es válido.' })
+    }
+    const { response } = req.body ?? {}
+    if (!['confirmed', 'cancelled'].includes(response)) {
+      return res.status(400).json({ error: 'Selecciona confirmar o cancelar la asistencia.' })
+    }
+    try {
+      const result = await respondToAttendance(pool, {
+        token: req.params.token,
+        response,
+      })
+      const { status, ...body } = result
+      return res.status(status).json(body)
     } catch (error) {
       return databaseError(res, error)
     }
@@ -133,6 +206,113 @@ export function createApp(pool, { notify = sendAppointmentNotification } = {}) {
         includesDemoEvents: data.some(event => event.is_demo),
         accessMode: 'prototipo-sin-autenticacion',
       })
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
+  app.get('/api/interconsultas/auditoria', async (req, res) => {
+    if (!requireDemoRole(req, res, 'medico')) return
+    try {
+      const data = await listAuditableReferrals(pool)
+      return res.json({ total: data.length, data, demo: true })
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
+  app.get('/api/interconsultas/devueltas', async (req, res) => {
+    if (!requireDemoRole(req, res, 'administrativo')) return
+    try {
+      const data = await listReturnedReferrals(pool)
+      return res.json({ total: data.length, data, demo: true })
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
+  app.post('/api/interconsultas/:id/devolver', async (req, res) => {
+    if (!requireDemoRole(req, res, 'medico')) return
+    if (!validDemoReferralId(req.params.id)) {
+      return res.status(404).json({ error: 'No se encontró la interconsulta asignada al médico auditor.' })
+    }
+    const { observations, missingExams = '' } = req.body ?? {}
+    if (![observations, missingExams].every(value => typeof value === 'string')
+      || (!observations.trim() && !missingExams.trim())
+      || observations.length > 3000 || missingExams.length > 3000) {
+      return res.status(400).json({
+        error: 'Escribe observaciones o indica los exámenes faltantes. Cada campo admite hasta 3000 caracteres.',
+      })
+    }
+
+    try {
+      const result = await reviewInterconsulta(pool, {
+        interconsultaId: req.params.id,
+        decision: 'return',
+        observations: observations.trim(),
+        missingExams: missingExams.trim(),
+        actor: getDemoActor(req),
+      })
+      if (result.data?.notification) {
+        result.data.notification = await deliverReferralReturnNotification(
+          result.data.notification,
+          notifyReferralReturn,
+        )
+      }
+      const { status, ...body } = result
+      return res.status(status).json(body)
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
+  app.post('/api/interconsultas/:id/rechazar', async (req, res) => {
+    if (!requireDemoRole(req, res, 'medico')) return
+    if (!validDemoReferralId(req.params.id)) {
+      return res.status(404).json({ error: 'No se encontró la interconsulta asignada al médico auditor.' })
+    }
+    const { reason } = req.body ?? {}
+    if (typeof reason !== 'string' || !reason.trim() || reason.length > 3000) {
+      return res.status(400).json({ error: 'Debes justificar el rechazo definitivo (máximo 3000 caracteres).' })
+    }
+
+    try {
+      const result = await reviewInterconsulta(pool, {
+        interconsultaId: req.params.id,
+        decision: 'reject',
+        reason: reason.trim(),
+        actor: getDemoActor(req),
+      })
+      const { status, ...body } = result
+      return res.status(status).json(body)
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
+  app.post('/api/interconsultas/:id/reenviar', async (req, res) => {
+    if (!requireDemoRole(req, res, 'administrativo')) return
+    if (!validDemoReferralId(req.params.id)) {
+      return res.status(404).json({ error: 'No se encontró la interconsulta devuelta.' })
+    }
+    const { issuerResponse, addedExams = '' } = req.body ?? {}
+    if (![issuerResponse, addedExams].every(value => typeof value === 'string')
+      || (!issuerResponse.trim() && !addedExams.trim())
+      || issuerResponse.length > 3000 || addedExams.length > 3000) {
+      return res.status(400).json({
+        error: 'Escribe una respuesta o los exámenes agregados antes de reenviar (máximo 3000 caracteres por campo).',
+      })
+    }
+
+    try {
+      const result = await resubmitReturnedInterconsulta(pool, {
+        interconsultaId: req.params.id,
+        issuerResponse: issuerResponse.trim(),
+        addedExams: addedExams.trim(),
+        actor: getDemoActor(req),
+      })
+      const { status, ...body } = result
+      return res.status(status).json(body)
     } catch (error) {
       return databaseError(res, error)
     }
@@ -209,6 +389,9 @@ export function createApp(pool, { notify = sendAppointmentNotification } = {}) {
       return res.status(400).json({
         error: 'Se requieren cupoId, interconsultaId, centroSolicitante, especialidad y prioridadClinica entre 0 y 3.',
       })
+    }
+    if (req.get('x-demo-profile') === 'medico' && !validDemoReferralId(interconsultaId.trim())) {
+      return res.status(403).json({ error: 'La interconsulta no está asignada al médico auditor de demostración.' })
     }
 
     try {

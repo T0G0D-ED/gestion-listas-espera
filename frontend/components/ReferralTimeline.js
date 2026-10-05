@@ -7,7 +7,7 @@ const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character =>
 }[character]))
 
 const profileNames = {
-  medico: 'Dra. Camila Rojas',
+  medico: 'Dr. Kosme Fulanito',
   administrativo: 'María Fernández',
 }
 

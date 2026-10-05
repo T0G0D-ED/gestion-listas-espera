@@ -148,7 +148,8 @@ test('reservation sends a test email and returns its delivery status', async t =
             return { rows: [], rowCount: 1 }
           }
           if (statement.startsWith('INSERT INTO APPOINTMENT_RESERVATION_EVENTS') ||
-              statement.startsWith('UPDATE APPOINTMENT_WAITLIST')) {
+              statement.startsWith('UPDATE APPOINTMENT_WAITLIST') ||
+              statement.startsWith('INSERT INTO APPOINTMENT_ATTENDANCE_TOKENS')) {
             return { rows: [], rowCount: 1 }
           }
           throw new Error(`Unexpected query: ${statement}`)
@@ -178,12 +179,26 @@ test('reservation sends a test email and returns its delivery status', async t =
   assert.equal(response.status, 201)
   assert.equal(notified.action, 'reserved')
   assert.equal(notified.interconsultaId, 'IC-2026-000184')
+  assert.match(notified.attendanceToken, /^[A-Za-z0-9_-]{43}$/)
   assert.equal(payload.data.notification.sent, true)
   assert.equal(payload.data.notification.recipient, 'test@example.com')
   assert.equal(timelineEventValues[4], 'Hospital de prueba')
   assert.equal(timelineEventValues[5], 'Dra. Prueba')
-  assert.equal(timelineEventValues[6], 'Dra. Camila Rojas (perfil de desarrollo)')
+  assert.equal(timelineEventValues[6], 'Dr. Kosme Fulanito (perfil de desarrollo)')
   assert.equal(timelineEventValues[7], 'medico')
+})
+
+test('attendance response endpoints reject malformed tokens and choices', async t => {
+  const baseUrl = await startTestServer(t)
+  const invalidToken = await fetch(`${baseUrl}/api/citas/asistencia/not-a-token`)
+  const invalidChoice = await fetch(`${baseUrl}/api/citas/asistencia/${'a'.repeat(43)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ response: 'maybe' }),
+  })
+
+  assert.equal(invalidToken.status, 400)
+  assert.equal(invalidChoice.status, 400)
 })
 
 test('timeline endpoint returns events, marks demo data, and uses the referral ID filter', async t => {
@@ -224,4 +239,45 @@ test('timeline endpoint rejects malformed referral IDs', async t => {
   const response = await fetch(`${baseUrl}/api/interconsultas/%3Cscript%3E/linea-tiempo`)
 
   assert.equal(response.status, 400)
+})
+
+test('auditor and CESFAM inboxes enforce their expected demo roles', async t => {
+  const baseUrl = await startTestServer(t)
+  const auditorInbox = await fetch(`${baseUrl}/api/interconsultas/auditoria`)
+  const returnedInbox = await fetch(`${baseUrl}/api/interconsultas/devueltas`, {
+    headers: { 'X-Demo-Profile': 'medico' },
+  })
+
+  assert.equal(auditorInbox.status, 403)
+  assert.equal(returnedInbox.status, 403)
+})
+
+test('rejection requires justification and returns forbid other demo roles', async t => {
+  const baseUrl = await startTestServer(t)
+  const missingJustification = await fetch(`${baseUrl}/api/interconsultas/IC-2026-000184/rechazar`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Demo-Profile': 'medico' },
+    body: JSON.stringify({ reason: '  ' }),
+  })
+  const wrongRole = await fetch(`${baseUrl}/api/interconsultas/IC-2026-000184/rechazar`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Demo-Profile': 'administrativo' },
+    body: JSON.stringify({ reason: 'No pertinente.' }),
+  })
+
+  assert.equal(missingJustification.status, 400)
+  assert.match((await missingJustification.json()).error, /justificar/i)
+  assert.equal(wrongRole.status, 403)
+})
+
+test('return requires observations or missing exams', async t => {
+  const baseUrl = await startTestServer(t)
+  const response = await fetch(`${baseUrl}/api/interconsultas/IC-2026-000184/devolver`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Demo-Profile': 'medico' },
+    body: JSON.stringify({ observations: ' ', missingExams: '' }),
+  })
+
+  assert.equal(response.status, 400)
+  assert.match((await response.json()).error, /observaciones|exámenes/i)
 })

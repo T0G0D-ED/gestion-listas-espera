@@ -16,6 +16,8 @@ export const demoPatients = Array.from({ length: demoPatientCount }, (_value, in
   }
 })
 
+export const demoInterconsultaIds = demoPatients.map(patient => patient.interconsultaId)
+
 export function normalizeRut(value) {
   return typeof value === 'string'
     ? value.replace(/[.\-\s]/g, '').toUpperCase()

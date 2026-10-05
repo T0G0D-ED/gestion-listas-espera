@@ -1,3 +1,6 @@
+import { createHash, randomBytes } from 'node:crypto'
+import { demoInterconsultaIds } from './demoPatients.js'
+
 const slotColumns = `
   id,
   to_char(appointment_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS at,
@@ -10,6 +13,31 @@ const slotColumns = `
 `
 
 const defaultActor = { name: 'Administrativo (prototipo)', role: 'administrativo' }
+const doctorOwnedReferralIds = new Set(demoInterconsultaIds)
+const attendanceActor = { name: 'Paciente (enlace de correo)', role: 'sistema' }
+
+function hashAttendanceToken(token) {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+async function issueAttendanceToken(client, reservationId, slotId) {
+  const token = randomBytes(32).toString('base64url')
+  await client.query(`
+    INSERT INTO appointment_attendance_tokens (
+      reservation_id, token_hash, expires_at, response, responded_at
+    )
+    SELECT $1, $2, appointment_at::timestamptz + INTERVAL '1 day', 'pending', NULL
+    FROM appointment_slots
+    WHERE id = $3
+    ON CONFLICT (reservation_id) DO UPDATE SET
+      token_hash = EXCLUDED.token_hash,
+      expires_at = EXCLUDED.expires_at,
+      response = 'pending',
+      created_at = NOW(),
+      responded_at = NULL
+  `, [reservationId, hashAttendanceToken(token), slotId])
+  return token
+}
 
 export async function listSlots(pool) {
   const result = await pool.query(`
@@ -22,7 +50,7 @@ export async function listSlots(pool) {
   return result.rows
 }
 
-export async function listReservations(pool) {
+export async function listReservations(pool, { interconsultaIds = null } = {}) {
   const result = await pool.query(`
     SELECT
       r.id::text AS reservation_id,
@@ -70,8 +98,9 @@ export async function listReservations(pool) {
     FROM appointment_reservations AS r
     JOIN appointment_slots AS s ON s.id = r.slot_id
     LEFT JOIN appointment_waitlist AS w ON w.interconsulta_id = r.interconsulta_id
+    WHERE $1::text[] IS NULL OR r.interconsulta_id = ANY($1::text[])
     ORDER BY r.reserved_at DESC
-  `)
+  `, [interconsultaIds])
 
   return result.rows
 }
@@ -116,6 +145,48 @@ export async function listTimelineEvents(pool, interconsultaId) {
   return result.rows
 }
 
+export async function listAuditableReferrals(pool) {
+  const result = await pool.query(`
+    SELECT
+      workflow.interconsulta_id,
+      workflow.status,
+      workflow.issuer_establishment,
+      workflow.issuer_professional,
+      workflow.observations,
+      workflow.missing_exams,
+      workflow.rejection_reason,
+      workflow.issuer_response,
+      workflow.added_exams,
+      workflow.updated_at,
+      workflow.returned_at,
+      workflow.rejected_at,
+      workflow.resubmitted_at
+    FROM interconsulta_review_workflow AS workflow
+    ORDER BY workflow.updated_at DESC, workflow.interconsulta_id
+  `)
+  return result.rows
+}
+
+export async function listReturnedReferrals(pool) {
+  const result = await pool.query(`
+    SELECT
+      workflow.interconsulta_id,
+      workflow.status,
+      workflow.issuer_establishment,
+      workflow.issuer_professional,
+      workflow.observations,
+      workflow.missing_exams,
+      workflow.issuer_response,
+      workflow.added_exams,
+      workflow.updated_at,
+      workflow.returned_at
+    FROM interconsulta_review_workflow AS workflow
+    WHERE workflow.status = 'returned'
+    ORDER BY workflow.returned_at DESC, workflow.interconsulta_id
+  `)
+  return result.rows
+}
+
 async function insertTimelineEvent(client, {
   interconsultaId,
   eventType,
@@ -124,12 +195,13 @@ async function insertTimelineEvent(client, {
   establishment,
   professionalName = null,
   actor = defaultActor,
+  isDemo = false,
 }) {
   await client.query(`
     INSERT INTO interconsulta_timeline_events (
       interconsulta_id, event_type, title, details, establishment,
-      professional_name, actor_name, actor_role
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      professional_name, actor_name, actor_role, is_demo
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
   `, [
     interconsultaId,
     eventType,
@@ -139,7 +211,151 @@ async function insertTimelineEvent(client, {
     professionalName,
     actor.name,
     actor.role,
+    isDemo,
   ])
+}
+
+export async function reviewInterconsulta(pool, {
+  interconsultaId,
+  decision,
+  observations = '',
+  missingExams = '',
+  reason = '',
+  actor,
+}) {
+  const client = await pool.connect()
+  let transactionOpen = false
+
+  try {
+    await client.query('BEGIN')
+    transactionOpen = true
+    const found = await client.query(`
+      SELECT interconsulta_id, status, issuer_establishment
+      FROM interconsulta_review_workflow
+      WHERE interconsulta_id = $1
+      FOR UPDATE
+    `, [interconsultaId])
+    if (!found.rowCount) {
+      await client.query('ROLLBACK')
+      transactionOpen = false
+      return { status: 404, error: 'No se encontró la interconsulta de demostración.' }
+    }
+    if (found.rows[0].status !== 'pending') {
+      await client.query('ROLLBACK')
+      transactionOpen = false
+      return { status: 409, error: 'Solo se pueden revisar interconsultas pendientes.' }
+    }
+
+    const returned = decision === 'return'
+    const nextStatus = returned ? 'returned' : 'rejected'
+    const result = await client.query(`
+      UPDATE interconsulta_review_workflow
+      SET status = $2,
+          observations = $3,
+          missing_exams = $4,
+          rejection_reason = $5,
+          updated_at = NOW(),
+          returned_at = CASE WHEN $2 = 'returned' THEN NOW() ELSE returned_at END,
+          rejected_at = CASE WHEN $2 = 'rejected' THEN NOW() ELSE rejected_at END
+      WHERE interconsulta_id = $1
+      RETURNING interconsulta_id, status, issuer_establishment, issuer_professional,
+        observations, missing_exams, rejection_reason, updated_at
+    `, [interconsultaId, nextStatus, observations, missingExams, returned ? null : reason])
+    await insertTimelineEvent(client, {
+      interconsultaId,
+      eventType: nextStatus,
+      title: returned ? 'Interconsulta devuelta al CESFAM' : 'Interconsulta rechazada definitivamente',
+      details: returned
+        ? 'Se solicitaron correcciones al profesional emisor.'
+        : 'La interconsulta fue cerrada tras la revisión de pertinencia.',
+      establishment: found.rows[0].issuer_establishment,
+      actor,
+      isDemo: true,
+    })
+    await client.query('COMMIT')
+    transactionOpen = false
+
+    return {
+      status: 200,
+      data: {
+        ...result.rows[0],
+        notification: returned ? {
+          action: 'returned',
+          interconsultaId,
+          issuerEstablishment: result.rows[0].issuer_establishment,
+          issuerProfessional: result.rows[0].issuer_professional,
+          observations,
+          missingExams,
+        } : null,
+      },
+    }
+  } catch (error) {
+    if (transactionOpen) await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
+export async function resubmitReturnedInterconsulta(pool, {
+  interconsultaId,
+  issuerResponse,
+  addedExams,
+  actor,
+}) {
+  const client = await pool.connect()
+  let transactionOpen = false
+
+  try {
+    await client.query('BEGIN')
+    transactionOpen = true
+    const found = await client.query(`
+      SELECT interconsulta_id, status, issuer_establishment
+      FROM interconsulta_review_workflow
+      WHERE interconsulta_id = $1
+      FOR UPDATE
+    `, [interconsultaId])
+    if (!found.rowCount) {
+      await client.query('ROLLBACK')
+      transactionOpen = false
+      return { status: 404, error: 'No se encontró la interconsulta de demostración.' }
+    }
+    if (found.rows[0].status !== 'returned') {
+      await client.query('ROLLBACK')
+      transactionOpen = false
+      return { status: 409, error: 'Solo se pueden reenviar interconsultas devueltas.' }
+    }
+
+    const result = await client.query(`
+      UPDATE interconsulta_review_workflow
+      SET status = 'pending',
+          issuer_response = $2,
+          added_exams = $3,
+          updated_at = NOW(),
+          resubmitted_at = NOW()
+      WHERE interconsulta_id = $1
+      RETURNING interconsulta_id, status, issuer_establishment,
+        issuer_professional, observations, missing_exams, issuer_response,
+        added_exams, updated_at, resubmitted_at
+    `, [interconsultaId, issuerResponse, addedExams])
+    await insertTimelineEvent(client, {
+      interconsultaId,
+      eventType: 'resubmitted',
+      title: 'Interconsulta reenviada para revisión',
+      details: 'El profesional emisor respondió a las observaciones y reenvió la interconsulta.',
+      establishment: found.rows[0].issuer_establishment,
+      actor,
+      isDemo: true,
+    })
+    await client.query('COMMIT')
+    transactionOpen = false
+    return { status: 200, data: result.rows[0] }
+  } catch (error) {
+    if (transactionOpen) await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
 }
 
 export async function addToWaitlist(pool, {
@@ -290,6 +506,11 @@ export async function reserveSlot(pool, {
       professionalName: updated.rows[0].doctor,
       actor,
     })
+    const attendanceToken = await issueAttendanceToken(
+      client,
+      reservation.rows[0].id,
+      cupoId,
+    )
 
     await client.query('COMMIT')
     transactionOpen = false
@@ -305,6 +526,7 @@ export async function reserveSlot(pool, {
           interconsultaId,
           centroSolicitante,
           previousSlot: updated.rows[0],
+          attendanceToken,
         },
       },
     }
@@ -321,6 +543,187 @@ export async function reserveSlot(pool, {
       return { status: 404, error: 'El cupo solicitado no existe en la red asistencial.' }
     }
 
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
+export async function getAttendanceRequest(pool, token) {
+  const result = await pool.query(`
+    SELECT
+      attendance.response,
+      attendance.expires_at > NOW() AS is_valid,
+      reservation.status AS reservation_status,
+      reservation.interconsulta_id,
+      to_char(slot.appointment_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS at,
+      slot.doctor,
+      slot.establishment AS est,
+      slot.modalidad AS mod,
+      slot.box
+    FROM appointment_attendance_tokens AS attendance
+    JOIN appointment_reservations AS reservation ON reservation.id = attendance.reservation_id
+    JOIN appointment_slots AS slot ON slot.id = reservation.slot_id
+    WHERE attendance.token_hash = $1
+  `, [hashAttendanceToken(token)])
+
+  if (result.rowCount === 0) return { status: 404, error: 'El enlace no es válido.' }
+  const appointment = result.rows[0]
+  if (!appointment.is_valid) return { status: 410, error: 'El enlace de respuesta venció.' }
+  return {
+    status: 200,
+    data: {
+      response: appointment.response,
+      reservationStatus: appointment.reservation_status,
+      interconsultaId: appointment.interconsulta_id,
+      slot: {
+        at: appointment.at,
+        doctor: appointment.doctor,
+        est: appointment.est,
+        mod: appointment.mod,
+        box: appointment.box,
+      },
+    },
+  }
+}
+
+export async function respondToAttendance(pool, { token, response }) {
+  const client = await pool.connect()
+  let transactionOpen = false
+
+  try {
+    await client.query('BEGIN')
+    transactionOpen = true
+    const found = await client.query(`
+      SELECT
+        attendance.reservation_id,
+        attendance.response AS attendance_response,
+        attendance.expires_at > NOW() AS is_valid,
+        reservation.slot_id,
+        reservation.status AS reservation_status,
+        reservation.interconsulta_id,
+        reservation.especialidad,
+        reservation.centro_solicitante,
+        reservation.prioridad_clinica,
+        to_char(slot.appointment_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS at,
+        slot.doctor,
+        slot.establishment AS est,
+        slot.modalidad AS mod,
+        slot.box
+      FROM appointment_attendance_tokens AS attendance
+      JOIN appointment_reservations AS reservation ON reservation.id = attendance.reservation_id
+      JOIN appointment_slots AS slot ON slot.id = reservation.slot_id
+      WHERE attendance.token_hash = $1
+      FOR UPDATE OF attendance, reservation
+    `, [hashAttendanceToken(token)])
+
+    if (found.rowCount === 0) {
+      await client.query('ROLLBACK')
+      transactionOpen = false
+      return { status: 404, error: 'El enlace no es válido.' }
+    }
+
+    const appointment = found.rows[0]
+    if (!appointment.is_valid) {
+      await client.query('ROLLBACK')
+      transactionOpen = false
+      return { status: 410, error: 'El enlace de respuesta venció.' }
+    }
+    if (appointment.attendance_response !== 'pending' || appointment.reservation_status !== 'active') {
+      await client.query('ROLLBACK')
+      transactionOpen = false
+      return { status: 409, error: 'Esta cita ya tiene una respuesta registrada.' }
+    }
+
+    if (response === 'cancelled') {
+      const reason = 'Cancelada por el paciente desde el enlace del correo.'
+      await client.query(`
+        UPDATE appointment_reservations
+        SET status = 'cancelled', cancellation_reason = $2, updated_at = NOW()
+        WHERE id = $1
+      `, [appointment.reservation_id, reason])
+      await client.query(`
+        UPDATE appointment_slots
+        SET cupos_disponibles = LEAST(total_cupos, cupos_disponibles + 1), updated_at = NOW()
+        WHERE id = $1
+      `, [appointment.slot_id])
+      await client.query(`
+        INSERT INTO appointment_reservation_events (reservation_id, action, reason, from_slot_id)
+        VALUES ($1, 'cancelled', $2, $3)
+      `, [appointment.reservation_id, reason, appointment.slot_id])
+      await client.query(`
+        INSERT INTO appointment_waitlist (
+          interconsulta_id, reservation_id, especialidad, centro_solicitante,
+          prioridad_clinica, status, motivo, entered_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, 'waiting', $6, NOW(), NOW())
+        ON CONFLICT (interconsulta_id) DO UPDATE SET
+          reservation_id = EXCLUDED.reservation_id,
+          especialidad = EXCLUDED.especialidad,
+          centro_solicitante = EXCLUDED.centro_solicitante,
+          prioridad_clinica = EXCLUDED.prioridad_clinica,
+          status = 'waiting',
+          motivo = EXCLUDED.motivo,
+          entered_at = NOW(),
+          updated_at = NOW()
+      `, [
+        appointment.interconsulta_id,
+        appointment.reservation_id,
+        appointment.especialidad,
+        appointment.centro_solicitante,
+        appointment.prioridad_clinica,
+        reason,
+      ])
+      await insertTimelineEvent(client, {
+        interconsultaId: appointment.interconsulta_id,
+        eventType: 'appointment_cancelled',
+        title: 'Asistencia cancelada por el paciente',
+        details: reason,
+        establishment: appointment.est,
+        professionalName: appointment.doctor,
+        actor: attendanceActor,
+      })
+    } else {
+      const reason = 'Asistencia confirmada por el paciente desde el enlace del correo.'
+      await client.query(`
+        INSERT INTO appointment_reservation_events (reservation_id, action, reason, to_slot_id)
+        VALUES ($1, 'attendance_confirmed', $2, $3)
+      `, [appointment.reservation_id, reason, appointment.slot_id])
+      await insertTimelineEvent(client, {
+        interconsultaId: appointment.interconsulta_id,
+        eventType: 'appointment_confirmed',
+        title: 'Asistencia confirmada',
+        details: reason,
+        establishment: appointment.est,
+        professionalName: appointment.doctor,
+        actor: attendanceActor,
+      })
+    }
+
+    await client.query(`
+      UPDATE appointment_attendance_tokens
+      SET response = $2, responded_at = NOW()
+      WHERE reservation_id = $1
+    `, [appointment.reservation_id, response])
+    await client.query('COMMIT')
+    transactionOpen = false
+
+    return {
+      status: 200,
+      data: {
+        response,
+        reservationStatus: response === 'cancelled' ? 'cancelled' : 'active',
+        interconsultaId: appointment.interconsulta_id,
+        slot: {
+          at: appointment.at,
+          doctor: appointment.doctor,
+          est: appointment.est,
+          mod: appointment.mod,
+          box: appointment.box,
+        },
+      },
+    }
+  } catch (error) {
+    if (transactionOpen) await client.query('ROLLBACK')
     throw error
   } finally {
     client.release()
@@ -352,6 +755,11 @@ export async function cancelReservation(pool, { reservationId, reason, actor = d
     }
 
     const reservation = found.rows[0]
+    if (actor.role === 'medico' && !doctorOwnedReferralIds.has(reservation.interconsulta_id)) {
+      await client.query('ROLLBACK')
+      transactionOpen = false
+      return { status: 403, error: 'Esta cita no pertenece al médico auditor de demostración.' }
+    }
     if (reservation.status !== 'active') {
       await client.query('ROLLBACK')
       transactionOpen = false
@@ -397,7 +805,6 @@ export async function cancelReservation(pool, { reservationId, reason, actor = d
       professionalName: reservation.doctor,
       actor,
     })
-
     await client.query('COMMIT')
     transactionOpen = false
     return {
@@ -454,6 +861,11 @@ export async function rescheduleReservation(pool, { reservationId, cupoId, reaso
     }
 
     const reservation = found.rows[0]
+    if (actor.role === 'medico' && !doctorOwnedReferralIds.has(reservation.interconsulta_id)) {
+      await client.query('ROLLBACK')
+      transactionOpen = false
+      return { status: 403, error: 'Esta cita no pertenece al médico auditor de demostración.' }
+    }
     if (reservation.status !== 'active') {
       await client.query('ROLLBACK')
       transactionOpen = false
@@ -523,6 +935,7 @@ export async function rescheduleReservation(pool, { reservationId, cupoId, reaso
       professionalName: updated.rows[0].doctor,
       actor,
     })
+    const attendanceToken = await issueAttendanceToken(client, reservationId, cupoId)
 
     await client.query('COMMIT')
     transactionOpen = false
@@ -545,6 +958,7 @@ export async function rescheduleReservation(pool, { reservationId, cupoId, reaso
           },
           nextSlot: updated.rows[0],
           reason,
+          attendanceToken,
         },
       },
     }

@@ -90,6 +90,10 @@ En la aplicación, el enlace **Cupos tomados** de la navegación abre una págin
 
 La pantalla **Interconsultas** incluye interconsultas de ejemplo desde `IC-2026-000184` hasta `IC-2026-000199`. Usa **Siguiente interconsulta** en el contexto para avanzar a una que todavía no tenga una cita activa y probar varias reservas. El control de última sincronización en ambas páginas muestra la fecha y hora de la última carga correcta.
 
+En **Interconsultas**, el contador de pendientes muestra las reservas guardadas en la cola local de IndexedDB. Selecciona el contador para desplegar las interconsultas que esperan subirse al servidor, con el cupo, establecimiento, profesional y hora en que se encolaron. Si no hay conexión, se puede guardar una reserva para sincronizarla cuando la conexión vuelva; al sincronizarse correctamente se elimina de la cola y el contador y el detalle se actualizan.
+
+Al terminar un intento de sincronización, la pantalla muestra una notificación emergente de éxito si todas las interconsultas se enviaron, o una advertencia con el resultado y el primer error si quedaron elementos pendientes. Las notificaciones se pueden cerrar manualmente y desaparecen automáticamente.
+
 ### Permitir el acceso desde otros equipos de la misma red
 
 Estos pasos permiten que otros equipos de la misma red local (por ejemplo, el mismo Wi-Fi) abran la aplicación alojada en este equipo. El equipo que la aloja debe permanecer encendido y ambos equipos deben seguir conectados a la red.

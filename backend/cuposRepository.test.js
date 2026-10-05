@@ -81,7 +81,8 @@ function createFakePool(initialAvailability) {
           }
 
           if (statement.startsWith('INSERT INTO APPOINTMENT_RESERVATION_EVENTS') ||
-              statement.startsWith('INSERT INTO INTERCONSULTA_TIMELINE_EVENTS')) {
+              statement.startsWith('INSERT INTO INTERCONSULTA_TIMELINE_EVENTS') ||
+              statement.startsWith('INSERT INTO APPOINTMENT_ATTENDANCE_TOKENS')) {
             return { rows: [], rowCount: 1 }
           }
 
@@ -196,7 +197,8 @@ function createManagementPool() {
             return { rows: [], rowCount: 1 }
           }
           if (statement.startsWith('INSERT INTO APPOINTMENT_RESERVATION_EVENTS') ||
-              statement.startsWith('INSERT INTO INTERCONSULTA_TIMELINE_EVENTS')) {
+              statement.startsWith('INSERT INTO INTERCONSULTA_TIMELINE_EVENTS') ||
+              statement.startsWith('INSERT INTO APPOINTMENT_ATTENDANCE_TOKENS')) {
             changes.push(values)
             return { rows: [], rowCount: 1 }
           }
@@ -226,6 +228,7 @@ test('rescheduling moves the reservation and transfers slot availability', async
   assert.equal(pool.slots.get('slot-2').cupos_disponibles, 0)
   assert.deepEqual(pool.changes[0], ['1', 'Solicitud del paciente', 'slot-1', 'slot-2'])
   assert.equal(result.data.notification.action, 'rescheduled')
+  assert.match(result.data.notification.attendanceToken, /^[A-Za-z0-9_-]{43}$/)
   assert.equal(result.data.notification.previousSlot.est, 'Hospital de prueba')
   assert.equal(result.data.notification.nextSlot.id, 'slot-2')
 })

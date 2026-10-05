@@ -52,6 +52,47 @@ export async function getPatientTimelineByRut(rut) {
   return result
 }
 
+export async function getAuditableReferrals() {
+  const result = await request('/api/interconsultas/auditoria', { cache: 'no-store' })
+  if (!Array.isArray(result.data)) {
+    throw new Error('La API no devolvió la bandeja de auditoría.')
+  }
+  return result.data
+}
+
+export async function getReturnedReferrals() {
+  const result = await request('/api/interconsultas/devueltas', { cache: 'no-store' })
+  if (!Array.isArray(result.data)) {
+    throw new Error('La API no devolvió las interconsultas devueltas.')
+  }
+  return result.data
+}
+
+export async function getAttendanceRequest(token) {
+  return request(`/api/citas/asistencia/${encodeURIComponent(token)}`, { cache: 'no-store' })
+}
+
+export async function respondToAttendance(token, response) {
+  return request(`/api/citas/asistencia/${encodeURIComponent(token)}`, {
+    method: 'POST',
+    body: JSON.stringify({ response }),
+  })
+}
+
+export async function reviewReferral(interconsultaId, decision, details) {
+  return request(
+    `/api/interconsultas/${encodeURIComponent(interconsultaId)}/${decision === 'return' ? 'devolver' : 'rechazar'}`,
+    { method: 'POST', body: JSON.stringify(details) },
+  )
+}
+
+export async function resubmitReferral(interconsultaId, details) {
+  return request(`/api/interconsultas/${encodeURIComponent(interconsultaId)}/reenviar`, {
+    method: 'POST',
+    body: JSON.stringify(details),
+  })
+}
+
 export async function getCupos() {
   const result = await request('/api/cupos', { cache: 'no-store' })
   if (!Array.isArray(result.data)) {

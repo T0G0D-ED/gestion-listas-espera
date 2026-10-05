@@ -51,11 +51,28 @@ ALTER TABLE appointment_reservations
 CREATE TABLE IF NOT EXISTS appointment_reservation_events (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   reservation_id BIGINT NOT NULL REFERENCES appointment_reservations(id),
-  action TEXT NOT NULL CHECK (action IN ('reserved', 'rescheduled', 'cancelled')),
+  action TEXT NOT NULL CHECK (action IN ('reserved', 'rescheduled', 'cancelled', 'attendance_confirmed')),
   reason TEXT NOT NULL,
   from_slot_id TEXT REFERENCES appointment_slots(id),
   to_slot_id TEXT REFERENCES appointment_slots(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE appointment_reservation_events
+  DROP CONSTRAINT IF EXISTS appointment_reservation_events_action_check;
+
+ALTER TABLE appointment_reservation_events
+  ADD CONSTRAINT appointment_reservation_events_action_check
+  CHECK (action IN ('reserved', 'rescheduled', 'cancelled', 'attendance_confirmed'));
+
+CREATE TABLE IF NOT EXISTS appointment_attendance_tokens (
+  reservation_id BIGINT PRIMARY KEY REFERENCES appointment_reservations(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  response TEXT NOT NULL DEFAULT 'pending'
+    CHECK (response IN ('pending', 'confirmed', 'cancelled')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  responded_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS appointment_waitlist (
@@ -77,7 +94,8 @@ CREATE TABLE IF NOT EXISTS interconsulta_timeline_events (
   event_type TEXT NOT NULL CHECK (
     event_type IN (
       'created', 'reviewed', 'priority_changed', 'waitlisted',
-      'appointment_reserved', 'appointment_rescheduled', 'appointment_cancelled'
+      'appointment_reserved', 'appointment_rescheduled', 'appointment_cancelled',
+      'appointment_confirmed', 'returned', 'rejected', 'resubmitted'
     )
   ),
   title TEXT NOT NULL,
@@ -90,6 +108,47 @@ CREATE TABLE IF NOT EXISTS interconsulta_timeline_events (
   source_key TEXT UNIQUE,
   is_demo BOOLEAN NOT NULL DEFAULT FALSE
 );
+
+ALTER TABLE interconsulta_timeline_events
+  DROP CONSTRAINT IF EXISTS interconsulta_timeline_events_event_type_check;
+
+ALTER TABLE interconsulta_timeline_events
+  ADD CONSTRAINT interconsulta_timeline_events_event_type_check
+  CHECK (
+    event_type IN (
+      'created', 'reviewed', 'priority_changed', 'waitlisted',
+      'appointment_reserved', 'appointment_rescheduled', 'appointment_cancelled',
+      'appointment_confirmed', 'returned', 'rejected', 'resubmitted'
+    )
+  );
+
+CREATE TABLE IF NOT EXISTS interconsulta_review_workflow (
+  interconsulta_id TEXT PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'returned', 'rejected')),
+  issuer_establishment TEXT NOT NULL,
+  issuer_professional TEXT NOT NULL,
+  observations TEXT,
+  missing_exams TEXT,
+  rejection_reason TEXT,
+  issuer_response TEXT,
+  added_exams TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  returned_at TIMESTAMPTZ,
+  rejected_at TIMESTAMPTZ,
+  resubmitted_at TIMESTAMPTZ
+);
+
+INSERT INTO interconsulta_review_workflow (
+  interconsulta_id, status, issuer_establishment, issuer_professional
+)
+SELECT
+  'IC-2026-' || LPAD((183 + sample.number)::text, 6, '0'),
+  'pending',
+  'CESFAM Nuevo Horizonte',
+  'Profesional emisor de demostración'
+FROM generate_series(1, 16) AS sample(number)
+ON CONFLICT (interconsulta_id) DO NOTHING;
 
 INSERT INTO appointment_reservation_events (reservation_id, action, reason, to_slot_id)
 SELECT r.id, 'reserved', 'Reserva registrada antes del historial', r.slot_id
@@ -110,11 +169,13 @@ SELECT
     WHEN 'reserved' THEN 'appointment_reserved'
     WHEN 'rescheduled' THEN 'appointment_rescheduled'
     WHEN 'cancelled' THEN 'appointment_cancelled'
+    WHEN 'attendance_confirmed' THEN 'appointment_confirmed'
   END,
   CASE event.action
     WHEN 'reserved' THEN 'Cupo asignado'
     WHEN 'rescheduled' THEN 'Cita reprogramada'
     WHEN 'cancelled' THEN 'Cita cancelada'
+    WHEN 'attendance_confirmed' THEN 'Asistencia confirmada'
   END,
   event.reason,
   COALESCE(to_slot.establishment, from_slot.establishment, r.centro_solicitante),
@@ -139,7 +200,7 @@ SELECT
   sample.title,
   sample.details,
   'CESFAM Nuevo Horizonte',
-  CASE WHEN sample.event_type = 'reviewed' THEN 'Dra. Camila Rojas' ELSE NULL END,
+  CASE WHEN sample.event_type = 'reviewed' THEN 'Dr. Kosme Fulanito' ELSE NULL END,
   sample.actor_name,
   sample.actor_role,
   NOW() - sample.days_ago * INTERVAL '1 day',
@@ -148,10 +209,12 @@ SELECT
 FROM generate_series(1, 16) AS sample_id(number)
 CROSS JOIN (VALUES
   ('created', 'Interconsulta creada', 'Ingreso de ejemplo al sistema.', 'Equipo CESFAM Nuevo Horizonte', 'administrativo', 90),
-  ('reviewed', 'Interconsulta revisada', 'Revisión inicial de antecedentes registrada en el prototipo.', 'Dra. Camila Rojas', 'medico', 65),
-  ('priority_changed', 'Prioridad clínica actualizada', 'Prioridad de ejemplo actualizada durante la revisión.', 'Dra. Camila Rojas', 'medico', 45)
+  ('reviewed', 'Interconsulta revisada', 'Revisión inicial de antecedentes registrada en el prototipo.', 'Dr. Kosme Fulanito', 'medico', 65),
+  ('priority_changed', 'Prioridad clínica actualizada', 'Prioridad de ejemplo actualizada durante la revisión.', 'Dr. Kosme Fulanito', 'medico', 45)
 ) AS sample(event_type, title, details, actor_name, actor_role, days_ago)
-ON CONFLICT (source_key) DO NOTHING;
+ON CONFLICT (source_key) DO UPDATE SET
+  professional_name = EXCLUDED.professional_name,
+  actor_name = EXCLUDED.actor_name;
 
 CREATE INDEX IF NOT EXISTS appointment_slots_at_idx
   ON appointment_slots (appointment_at);
@@ -172,3 +235,6 @@ CREATE INDEX IF NOT EXISTS appointment_waitlist_priority_fifo_idx
 
 CREATE INDEX IF NOT EXISTS interconsulta_timeline_events_referral_idx
   ON interconsulta_timeline_events (interconsulta_id, event_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS interconsulta_review_workflow_status_idx
+  ON interconsulta_review_workflow (status, updated_at DESC);

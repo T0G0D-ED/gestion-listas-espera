@@ -32,7 +32,7 @@ document.querySelector('#app').innerHTML = `
         <label for="timeline-profile" class="block text-sm font-semibold text-slate-800">Perfil de demostración</label>
         <select id="timeline-profile" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm sm:max-w-sm">
           <option value="administrativo">Administrativo · María Fernández</option>
-          <option value="medico">Médico · Dra. Camila Rojas</option>
+          <option value="medico">Médico · Dr. Kosme Fulanito</option>
         </select>
       </div>
       <section class="mt-6 border-t border-slate-200 pt-5" aria-labelledby="timeline-results-title">

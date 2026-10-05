@@ -33,3 +33,25 @@ export async function reservarCupo({ cupoId, interconsultaId, centroSolicitante 
     body: JSON.stringify({ cupoId, interconsultaId, centroSolicitante }),
   })
 }
+
+export async function getReservas() {
+  const result = await request('/api/reservas', { cache: 'no-store' })
+  if (!Array.isArray(result.data)) {
+    throw new Error('La API no devolvió la lista de citas tomadas.')
+  }
+  return result.data
+}
+
+export async function reprogramarReserva(reservationId, { cupoId, motivo, otroMotivo }) {
+  return request(`/api/reservas/${encodeURIComponent(reservationId)}/reprogramar`, {
+    method: 'PATCH',
+    body: JSON.stringify({ cupoId, motivo, otroMotivo }),
+  })
+}
+
+export async function cancelarReserva(reservationId, { motivo, otroMotivo }) {
+  return request(`/api/reservas/${encodeURIComponent(reservationId)}/cancelar`, {
+    method: 'PATCH',
+    body: JSON.stringify({ motivo, otroMotivo }),
+  })
+}

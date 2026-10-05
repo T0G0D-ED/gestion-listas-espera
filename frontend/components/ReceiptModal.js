@@ -1,4 +1,18 @@
-export function renderReceiptModal({ slot, receiptId, date, time }) {
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+}[character]))
+
+export function renderReceiptModal({ slot, receiptId, date, time, notification }) {
+  const notificationMessage = notification?.sent
+    ? `Correo de prueba enviado correctamente a ${escapeHtml(notification.recipient)}.`
+    : notification?.error || 'La cita se confirmó, pero no se pudo confirmar el envío del correo de prueba.'
+  const notificationStyle = notification?.sent
+    ? 'bg-emerald-50 text-emerald-800'
+    : 'bg-amber-50 text-amber-900'
   return `<dialog id="receipt-modal" aria-labelledby="receipt-title" class="fixed left-1/2 top-1/2 m-0 w-[calc(100%-2rem)] max-w-lg max-h-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border-0 p-0 backdrop:bg-slate-900/50">
     <div class="p-6">
       <div class="flex items-start justify-between gap-4">
@@ -8,7 +22,7 @@ export function renderReceiptModal({ slot, receiptId, date, time }) {
         </div>
         <button type="button" id="receipt-close" aria-label="Cerrar comprobante" class="rounded-lg border px-3 py-1 text-sm hover:bg-slate-50">Cerrar</button>
       </div>
-      <p class="mt-3 text-sm text-slate-600">El comprobante fue enviado a la dirección de correo asociada al paciente.</p>
+      <p role="${notification?.sent ? 'status' : 'alert'}" class="mt-3 rounded-lg p-3 text-sm ${notificationStyle}">${notificationMessage}</p>
       <div class="mt-4 flex flex-wrap gap-2">
         <button type="button" id="receipt-preview-toggle" aria-expanded="false" aria-controls="receipt-preview" class="rounded-lg border border-brand px-4 py-2 text-sm font-medium text-brand hover:bg-brand-tint">Previsualizar comprobante</button>
         <button type="button" id="receipt-download" class="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">Descargar PDF</button>

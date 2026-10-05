@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { reserveSlot } from './cuposRepository.js'
+import {
+  cancelReservation,
+  reserveSlot,
+  rescheduleReservation,
+} from './cuposRepository.js'
 
 function createFakePool(initialAvailability) {
   const slot = {
@@ -99,4 +103,109 @@ test('only one center reserves the final slot', async () => {
   assert.deepEqual(reservations.map(result => result.status).sort(), [201, 409])
   assert.equal(pool.slot.cupos_disponibles, 0)
   assert.equal(pool.reservations.size, 1)
+})
+
+function createManagementPool() {
+  const slots = new Map([
+    ['slot-1', { id: 'slot-1', cupos_disponibles: 0, total_cupos: 1 }],
+    ['slot-2', { id: 'slot-2', cupos_disponibles: 1, total_cupos: 1 }],
+  ])
+  const reservations = new Map([
+    ['1', { id: '1', slot_id: 'slot-1', status: 'reserved' }],
+  ])
+  const changes = []
+
+  return {
+    slots,
+    reservations,
+    changes,
+    async connect() {
+      return {
+        async query(sql, values = []) {
+          const statement = sql.replace(/\s+/g, ' ').trim().toUpperCase()
+          if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(statement)) {
+            return { rows: [], rowCount: 0 }
+          }
+          if (statement.startsWith('SELECT R.ID, R.SLOT_ID, R.INTERCONSULTA_ID')) {
+            const reservation = reservations.get(String(values[0]))
+            const rows = reservation?.status === 'reserved'
+              ? [{
+                  id: reservation.id,
+                  slot_id: reservation.slot_id,
+                  interconsulta_id: 'IC-2026-000184',
+                  centro_solicitante: 'CESFAM de prueba',
+                  at: '2026-10-05T10:00:00',
+                  doctor: 'Profesional de prueba',
+                  est: 'Hospital de prueba',
+                  mod: 'Presencial',
+                  box: 'Box 1',
+                }]
+              : []
+            return { rows, rowCount: rows.length }
+          }
+          if (statement.startsWith('UPDATE APPOINTMENT_SLOTS') &&
+              statement.includes('CUPOS_DISPONIBLES = CUPOS_DISPONIBLES - 1')) {
+            const slot = slots.get(values[0])
+            if (!slot || slot.cupos_disponibles < 1) return { rows: [], rowCount: 0 }
+            slot.cupos_disponibles -= 1
+            return { rows: [{ ...slot, cupos: slot.cupos_disponibles }], rowCount: 1 }
+          }
+          if (statement.startsWith('SELECT ID FROM APPOINTMENT_SLOTS')) {
+            const rows = slots.has(values[0]) ? [{ id: values[0] }] : []
+            return { rows, rowCount: rows.length }
+          }
+          if (statement.startsWith('UPDATE APPOINTMENT_SLOTS') &&
+              statement.includes('LEAST(TOTAL_CUPOS, CUPOS_DISPONIBLES + 1)')) {
+            const slot = slots.get(values[0])
+            if (slot) slot.cupos_disponibles = Math.min(slot.total_cupos, slot.cupos_disponibles + 1)
+            return { rows: [], rowCount: slot ? 1 : 0 }
+          }
+          if (statement.startsWith('UPDATE APPOINTMENT_RESERVATIONS SET SLOT_ID')) {
+            const reservation = reservations.get(String(values[1]))
+            reservation.slot_id = values[0]
+            return { rows: [], rowCount: 1 }
+          }
+          if (statement.startsWith('UPDATE APPOINTMENT_RESERVATIONS SET STATUS')) {
+            const reservation = reservations.get(String(values[0]))
+            reservation.status = 'cancelled'
+            return { rows: [], rowCount: 1 }
+          }
+          if (statement.startsWith('INSERT INTO APPOINTMENT_RESERVATION_CHANGES')) {
+            changes.push(values)
+            return { rows: [], rowCount: 1 }
+          }
+          throw new Error(`Unexpected query: ${statement}`)
+        },
+        release() {},
+      }
+    },
+  }
+}
+
+test('rescheduling moves the reservation and transfers slot availability', async () => {
+  const pool = createManagementPool()
+  const result = await rescheduleReservation(pool, {
+    reservationId: '1',
+    cupoId: 'slot-2',
+    reason: 'Solicitud del paciente',
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(pool.reservations.get('1').slot_id, 'slot-2')
+  assert.equal(pool.slots.get('slot-1').cupos_disponibles, 1)
+  assert.equal(pool.slots.get('slot-2').cupos_disponibles, 0)
+  assert.deepEqual(pool.changes[0], ['1', 'slot-1', 'slot-2', 'Solicitud del paciente'])
+})
+
+test('cancellation releases the slot and preserves the required reason', async () => {
+  const pool = createManagementPool()
+  const result = await cancelReservation(pool, {
+    reservationId: '1',
+    reason: 'Otro: Problema de traslado',
+  })
+
+  assert.equal(result.status, 200)
+  assert.equal(pool.reservations.get('1').status, 'cancelled')
+  assert.equal(pool.slots.get('slot-1').cupos_disponibles, 1)
+  assert.deepEqual(pool.changes[0], ['1', 'slot-1', 'Otro: Problema de traslado'])
 })

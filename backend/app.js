@@ -11,6 +11,7 @@ import {
   rescheduleReservation,
 } from './cuposRepository.js'
 import { sendAppointmentNotification } from './resendNotifications.js'
+import { demoPatients, findDemoPatientByRut, isRutFormatValid } from './demoPatients.js'
 
 const defaultOrigins = [
   'http://localhost:4173',
@@ -131,6 +132,36 @@ export function createApp(pool, { notify = sendAppointmentNotification } = {}) {
         data,
         includesDemoEvents: data.some(event => event.is_demo),
         accessMode: 'prototipo-sin-autenticacion',
+      })
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
+  app.get('/api/pacientes/ruts-demostracion', (_req, res) => {
+    res.json({
+      data: demoPatients.map(({ rut, interconsultaId }) => ({ rut, interconsultaId })),
+      demo: true,
+    })
+  })
+
+  app.get('/api/pacientes/linea-tiempo', async (req, res) => {
+    const { rut } = req.query
+    if (!isRutFormatValid(rut)) {
+      return res.status(400).json({ error: 'Ingresa un RUT con formato válido.' })
+    }
+    const patient = findDemoPatientByRut(rut)
+    if (!patient) {
+      return res.status(404).json({ error: 'No encontramos una interconsulta asociada a ese RUT de demostración.' })
+    }
+    try {
+      const data = await listTimelineEvents(pool, patient.interconsultaId)
+      return res.json({
+        rut: patient.rut,
+        interconsultaId: patient.interconsultaId,
+        data,
+        includesDemoEvents: data.some(event => event.is_demo),
+        demo: true,
       })
     } catch (error) {
       return databaseError(res, error)

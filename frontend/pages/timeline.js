@@ -4,7 +4,7 @@ import '@fontsource/inter/latin-600.css'
 import '@fontsource/inter/latin-700.css'
 import '../assets/style.css'
 import { registerSW } from 'virtual:pwa-register'
-import { renderHeader } from '../components/Header.js'
+import { bindRoleSwitcher, renderHeader } from '../components/Header.js'
 import { renderReferralTimeline } from '../components/ReferralTimeline.js'
 import { getInterconsultaTimeline } from '../services/api.js'
 
@@ -45,6 +45,7 @@ document.querySelector('#app').innerHTML = `
       </section>
     </section>
   </main>`
+bindRoleSwitcher()
 
 const $ = selector => document.querySelector(selector)
 const exampleReferralIds = Array.from({ length: 16 }, (_, index) =>

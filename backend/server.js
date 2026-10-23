@@ -3,6 +3,7 @@ import { createApp } from './app.js'
 import { pool } from './db/pool.js'
 import parametrosRouter from './routes/parametros.js';
 import { inicializarParametros } from './db/init_parametros.js';
+import alertasRouter from './routes/alertas.js';
 
 
 
@@ -29,3 +30,6 @@ inicializarParametros().catch(console.error);
 
 // Montar los endpoints
 app.use('/api/parametros-prioridad', parametrosRouter);
+
+// Montar el endpoint de la tarea #64
+app.use('/api/alertas', alertasRouter);

@@ -15,8 +15,11 @@ import {
   reviewInterconsulta,
   rescheduleReservation,
   respondToAttendance,
+  countUnreadCounterReferrals,
   createCounterReferral,
   listCounterReferrals,
+  listCounterReferralsForCesfam,
+  markCounterReferralRead,
 } from './cuposRepository.js'
 import {
   sendAppointmentNotification,
@@ -393,6 +396,47 @@ app.get('/api/contrarreferencias', async (req, res) => {
       const result = await createCounterReferral(pool, {
         interconsultaId: req.params.id,
         ...parsed.value,
+        actor: getDemoActor(req),
+      })
+      const { status, ...body } = result
+      return res.status(status).json(body)
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
+  app.get('/api/cesfam/contrarreferencias', async (req, res) => {
+    if (!requireDemoRole(req, res, 'administrativo')) return
+    try {
+      const data = await listCounterReferralsForCesfam(pool)
+      return res.json({
+        total: data.length,
+        unread: data.filter(item => !item.read_at).length,
+        data,
+        demo: true,
+      })
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
+  app.get('/api/cesfam/contrarreferencias/pendientes', async (req, res) => {
+    if (!requireDemoRole(req, res, 'administrativo')) return
+    try {
+      return res.json({ unread: await countUnreadCounterReferrals(pool) })
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
+  app.post('/api/cesfam/contrarreferencias/:id/leida', async (req, res) => {
+    if (!requireDemoRole(req, res, 'administrativo')) return
+    if (!validDemoReferralId(req.params.id)) {
+      return res.status(404).json({ error: 'No se encontró la interconsulta.' })
+    }
+    try {
+      const result = await markCounterReferralRead(pool, {
+        interconsultaId: req.params.id,
         actor: getDemoActor(req),
       })
       const { status, ...body } = result

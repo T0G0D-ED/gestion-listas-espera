@@ -1,3 +1,5 @@
+import { getUnreadCounterReferralCount } from '../services/api.js'
+
 function getCurrentRole() {
   try {
     const role = localStorage.getItem('appRole')
@@ -30,7 +32,7 @@ export function renderHeader(activePage = 'interconsultas') {
       : '<button type="button" data-switch-role="medico" class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-slate-100">Cambiar a Médico · Dr. Kosme Fulanito</button><button type="button" data-switch-role="paciente" class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-slate-100">Cambiar a Paciente</button>'
   const navigation = patientMode
     ? `<a href="/" class="font-semibold text-brand" aria-current="page">Inicio</a>`
-    : `<a href="/" class="${interconsultasClass}" ${interconsultasCurrent}>Interconsultas</a><a href="/timeline.html" class="${timelineClass}" ${timelineCurrent}>Línea de tiempo</a><a href="/reservas.html" class="${reservationsClass}" ${reservationsCurrent}>Cupos tomados</a>${doctorMode ? `<a href="/contrarreferencia.html" class="${activePage === 'contrarreferencia' ? 'font-semibold text-brand' : 'text-slate-500 hover:text-slate-800'}" ${activePage === 'contrarreferencia' ? 'aria-current="page"' : ''}>Contrarreferencia</a>` : ''}${!doctorMode ? `<a href="/devueltas.html" class="${activePage === 'devueltas' ? 'font-semibold text-brand' : 'text-slate-500 hover:text-slate-800'}" ${activePage === 'devueltas' ? 'aria-current="page"' : ''}>Devueltas al CESFAM</a>` : ''}`
+    : `<a href="/" class="${interconsultasClass}" ${interconsultasCurrent}>Interconsultas</a><a href="/timeline.html" class="${timelineClass}" ${timelineCurrent}>Línea de tiempo</a><a href="/reservas.html" class="${reservationsClass}" ${reservationsCurrent}>Cupos tomados</a>${doctorMode ? `<a href="/contrarreferencia.html" class="${activePage === 'contrarreferencia' ? 'font-semibold text-brand' : 'text-slate-500 hover:text-slate-800'}" ${activePage === 'contrarreferencia' ? 'aria-current="page"' : ''}>Contrarreferencia</a>` : ''}${!doctorMode ? `<a href="/devueltas.html" class="${activePage === 'devueltas' ? 'font-semibold text-brand' : 'text-slate-500 hover:text-slate-800'}" ${activePage === 'devueltas' ? 'aria-current="page"' : ''}>Devueltas al CESFAM</a><a href="/contrarreferidas.html" class="${activePage === 'contrarreferidas' ? 'font-semibold text-brand' : 'text-slate-500 hover:text-slate-800'}" ${activePage === 'contrarreferidas' ? 'aria-current="page"' : ''}>Contrarreferidas<span data-counterreferral-badge hidden class="ml-1.5 rounded-full bg-rose-600 px-1.5 py-0.5 text-center text-[11px] font-semibold leading-none text-white"></span></a>` : ''}`
 
   return `
 <header class="relative z-40 bg-white border-b border-slate-200">
@@ -55,7 +57,23 @@ export function renderHeader(activePage = 'interconsultas') {
 </header>`
 }
 
+export async function refreshCounterReferralBadge() {
+  const badges = document.querySelectorAll('[data-counterreferral-badge]')
+  if (!badges.length) return
+  try {
+    const unread = await getUnreadCounterReferralCount()
+    for (const badge of badges) {
+      badge.textContent = unread > 99 ? '99+' : String(unread)
+      badge.setAttribute('aria-label', `${unread} contrarreferencias sin leer`)
+      badge.hidden = unread === 0
+    }
+  } catch {
+    for (const badge of badges) badge.hidden = true
+  }
+}
+
 export function bindRoleSwitcher() {
+  void refreshCounterReferralBadge()
   const switcher = document.querySelector('#role-switcher')
   if (!switcher) return
   switcher.addEventListener('click', event => {

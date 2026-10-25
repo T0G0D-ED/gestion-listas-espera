@@ -175,3 +175,22 @@ export async function createCounterReferral(interconsultaId, details) {
     body: JSON.stringify(details),
   })
 }
+
+export async function getCesfamCounterReferrals() {
+  const result = await request('/api/cesfam/contrarreferencias', { cache: 'no-store' })
+  if (!Array.isArray(result.data)) {
+    throw new Error('La API no devolvió las contrarreferencias recibidas.')
+  }
+  return result.data
+}
+
+export async function getUnreadCounterReferralCount() {
+  const result = await request('/api/cesfam/contrarreferencias/pendientes', { cache: 'no-store' })
+  return Number(result.unread) || 0
+}
+
+export async function markCounterReferralRead(interconsultaId) {
+  return request(`/api/cesfam/contrarreferencias/${encodeURIComponent(interconsultaId)}/leida`, {
+    method: 'POST',
+  })
+}

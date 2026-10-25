@@ -27,6 +27,7 @@ export default defineConfig({
         reservas: fileURLToPath(new URL('./frontend/reservas.html', import.meta.url)),
         asistencia: fileURLToPath(new URL('./frontend/asistencia.html', import.meta.url)),
         contrarreferencia: fileURLToPath(new URL('./frontend/contrarreferencia.html', import.meta.url)),
+        contrarreferidas: fileURLToPath(new URL('./frontend/contrarreferidas.html', import.meta.url)),
       },
     },
   },

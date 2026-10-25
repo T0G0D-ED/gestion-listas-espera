@@ -1,5 +1,7 @@
 import cors from 'cors'
 import express from 'express'
+import { crearMiddlewareAuditoria } from './middleware/auditoria.js'
+
 import {
   cancelReservation,
   addToWaitlist,
@@ -123,6 +125,13 @@ export function createApp(pool, {
     },
   }))
   app.use(express.json({ limit: '32kb' }))
+
+  // AUDITORIA (Tareas #37 y #38)
+  // Se inyecta el pool recibido por createApp (no importa su propia conexion)
+  // Internamente filtra: solo audita POST/PUT/PATCH/DELETE sobre /api
+  // Los GET no se registran para no saturar la tabla
+  app.use('/api', crearMiddlewareAuditoria(pool))
+
 
   app.get('/api/health', async (_req, res) => {
     try {

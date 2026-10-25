@@ -4,65 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestión de Listas de Espera en Atención Primaria de Salud (APS)</title>
-    <!-- Agregamos Bootstrap para que las tarjetas y botones tengan estilos visuales -->
-    <link href="https://jsdelivr.net" rel="stylesheet">
 </head>
 <body>
-
-    <!-- Tarea #65: Dashboard de Alertas Críticas (Frontend Mínimo) -->
-    <div class="container mt-4">
-        <h2>Dashboard de Alertas Críticas (>= 80% Tiempo Límite)</h2>
-        <button onclick="cargarAlertasCriticas()" class="btn btn-warning mb-3">Actualizar Alertas</button>
-
-        <div id="contenedor-alertas" class="row">
-            <!-- Las tarjetas se cargarán dinámicamente aquí -->
-        </div>
-    </div>
-
-    <!-- Lógica JavaScript para conectar con el backend -->
-    <script>
-    async function cargarAlertasCriticas() {
-        const contenedor = document.getElementById('contenedor-alertas');
-        contenedor.innerHTML = '<p>Cargando alertas...</p>';
-
-        try {
-            // Consumimos el endpoint del backend que creamos en la Tarea #64
-            const res = await fetch('http://localhost:3000/api/alertas/criticas');
-            const data = await res.json();
-
-            if (!data.alertas || data.alertas.length === 0) {
-                contenedor.innerHTML = '<div class="alert alert-success">No hay interconsultas próximas a vencer.</div>';
-                return;
-            }
-
-            contenedor.innerHTML = '';
-            data.alertas.forEach(alerta => {
-                const card = document.createElement('div');
-                card.className = 'col-md-4 mb-3';
-                card.innerHTML = `
-                    <div class="card border-danger shadow-sm">
-                        <div class="card-body">
-                            <h5 class="card-title text-danger">⚠️ Paciente: ${alerta.paciente_rut}</h5>
-                            <p class="card-text">
-                                <strong>UUID:</strong> <small>${alerta.uuid}</small><br>
-                                <strong>Prioridad:</strong> ${alerta.prioridad}<br>
-                                <strong>Centro:</strong> ${alerta.centro_salud}<br>
-                                <strong>Horas pasadas:</strong> ${alerta.horas_transcurridas}h / ${alerta.tiempo_maximo_horas}h<br>
-                                <strong>Tiempo consumido:</strong> <span class="badge bg-danger">${alerta.porcentaje_tiempo_usado}%</span>
-                            </p>
-                        </div>
-                    </div>
-                `;
-                contenedor.appendChild(card);
-            });
-        } catch (err) {
-            contenedor.innerHTML = '<div class="alert alert-danger">Error al conectar con la API de alertas.</div>';
-        }
-    }
-
-    // Ejecuta la función automáticamente al cargar la página por primera vez
-    document.addEventListener('DOMContentLoaded', cargarAlertasCriticas);
-    </script>
-
+    
 </body>
 </html>

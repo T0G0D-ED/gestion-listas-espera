@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS interconsulta_timeline_events (
     event_type IN (
       'created', 'reviewed', 'priority_changed', 'waitlisted',
       'appointment_reserved', 'appointment_rescheduled', 'appointment_cancelled',
-      'appointment_confirmed', 'returned', 'rejected', 'resubmitted'
+      'appointment_confirmed', 'returned', 'rejected', 'resubmitted', 'counterreferred'
     )
   ),
   title TEXT NOT NULL,
@@ -118,7 +118,7 @@ ALTER TABLE interconsulta_timeline_events
     event_type IN (
       'created', 'reviewed', 'priority_changed', 'waitlisted',
       'appointment_reserved', 'appointment_rescheduled', 'appointment_cancelled',
-      'appointment_confirmed', 'returned', 'rejected', 'resubmitted'
+      'appointment_confirmed', 'returned', 'rejected', 'resubmitted', 'counterreferred'
     )
   );
 
@@ -138,6 +138,35 @@ CREATE TABLE IF NOT EXISTS interconsulta_review_workflow (
   rejected_at TIMESTAMPTZ,
   resubmitted_at TIMESTAMPTZ
 );
+CREATE TABLE IF NOT EXISTS interconsulta_counterreferrals (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  interconsulta_id TEXT NOT NULL UNIQUE
+    REFERENCES interconsulta_review_workflow (interconsulta_id),
+  final_diagnosis TEXT NOT NULL CHECK (length(btrim(final_diagnosis)) > 0),
+  indications TEXT NOT NULL CHECK (length(btrim(indications)) > 0),
+  therapeutic_plan TEXT NOT NULL CHECK (length(btrim(therapeutic_plan)) > 0),
+  attention_date DATE,
+  observations TEXT,
+  specialist_establishment TEXT NOT NULL,
+  specialist_name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE interconsulta_review_workflow
+  DROP CONSTRAINT IF EXISTS interconsulta_review_workflow_status_check;
+
+ALTER TABLE interconsulta_review_workflow
+  ADD CONSTRAINT interconsulta_review_workflow_status_check
+  CHECK (status IN ('pending', 'returned', 'rejected', 'counterreferred'));
+
+ALTER TABLE interconsulta_counterreferrals
+  ADD COLUMN IF NOT EXISTS document_hash TEXT,
+  ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS read_by TEXT;
+
+CREATE INDEX IF NOT EXISTS interconsulta_counterreferrals_unread_idx
+  ON interconsulta_counterreferrals (created_at DESC)
+  WHERE read_at IS NULL;
 
 INSERT INTO interconsulta_review_workflow (
   interconsulta_id, status, issuer_establishment, issuer_professional

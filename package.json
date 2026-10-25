@@ -11,7 +11,7 @@
         "start:backend": "node backend/server.js",
         "db:migrate": "node backend/db/migrate.js",
         "db:seed": "node backend/db/seed.js",
-        "test:backend": "node --test backend/cuposRepository.test.js backend/app.test.js backend/attendance.test.js backend/patientTimeline.test.js backend/reviewWorkflow.test.js backend/resendNotifications.test.js"
+        "test:backend": "node --test backend/cuposRepository.test.js backend/app.test.js backend/attendance.test.js backend/patientTimeline.test.js backend/reviewWorkflow.test.js backend/resendNotifications.test.js backend/counterReferral.test.js"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.3.3",

@@ -17,6 +17,11 @@ import {
   reviewInterconsulta,
   rescheduleReservation,
   respondToAttendance,
+  countUnreadCounterReferrals,
+  createCounterReferral,
+  listCounterReferrals,
+  listCounterReferralsForCesfam,
+  markCounterReferralRead,
 } from './cuposRepository.js'
 import {
   sendAppointmentNotification,
@@ -66,6 +71,57 @@ function getReason(body = {}) {
   if (motivo.trim() !== 'Otro') return motivo.trim()
   if (typeof otroMotivo !== 'string' || !otroMotivo.trim()) return null
   return `Otro: ${otroMotivo.trim()}`
+}
+
+const counterReferralMaxLength = 3000
+
+function isRealIsoDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const date = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(value)
+}
+
+export function parseCounterReferral(body = {}) {
+  const {
+    finalDiagnosis, indications, therapeuticPlan, attentionDate = '', observations = '',
+  } = body ?? {}
+  const required = { finalDiagnosis, indications, therapeuticPlan }
+  const labels = {
+    finalDiagnosis: 'el diagnóstico final',
+    indications: 'las indicaciones',
+    therapeuticPlan: 'el plan terapéutico',
+  }
+  for (const [key, value] of Object.entries(required)) {
+    if (typeof value !== 'string' || !value.trim()) {
+      return { error: `Debes completar ${labels[key]}.` }
+    }
+    if (value.length > counterReferralMaxLength) {
+      return { error: `El texto de ${labels[key]} admite hasta ${counterReferralMaxLength} caracteres.` }
+    }
+  }
+  if (typeof observations !== 'string' || observations.length > counterReferralMaxLength) {
+    return { error: `Las observaciones admiten hasta ${counterReferralMaxLength} caracteres.` }
+  }
+  if (typeof attentionDate !== 'string') {
+    return { error: 'La fecha de atención no es válida.' }
+  }
+  let date = null
+  if (attentionDate.trim()) {
+    date = attentionDate.trim()
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    if (!isRealIsoDate(date) || date > tomorrow) {
+      return { error: 'La fecha de atención no es válida o está en el futuro.' }
+    }
+  }
+  return {
+    value: {
+      finalDiagnosis: finalDiagnosis.trim(),
+      indications: indications.trim(),
+      therapeuticPlan: therapeuticPlan.trim(),
+      attentionDate: date,
+      observations: observations.trim(),
+    },
+  }
 }
 
 function databaseError(res, error) {
@@ -318,6 +374,78 @@ export function createApp(pool, {
         interconsultaId: req.params.id,
         issuerResponse: issuerResponse.trim(),
         addedExams: addedExams.trim(),
+        actor: getDemoActor(req),
+      })
+      const { status, ...body } = result
+      return res.status(status).json(body)
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
+app.get('/api/contrarreferencias', async (req, res) => {
+    if (!requireDemoRole(req, res, 'medico')) return
+    try {
+      const data = await listCounterReferrals(pool)
+      return res.json({ total: data.length, data, demo: true })
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
+  app.post('/api/interconsultas/:id/contrarreferencia', async (req, res) => {
+    if (!requireDemoRole(req, res, 'medico')) return
+    if (!validDemoReferralId(req.params.id)) {
+      return res.status(404).json({ error: 'No se encontró la interconsulta asignada al médico.' })
+    }
+    const parsed = parseCounterReferral(req.body)
+    if (parsed.error) return res.status(400).json({ error: parsed.error })
+
+    try {
+      const result = await createCounterReferral(pool, {
+        interconsultaId: req.params.id,
+        ...parsed.value,
+        actor: getDemoActor(req),
+      })
+      const { status, ...body } = result
+      return res.status(status).json(body)
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
+  app.get('/api/cesfam/contrarreferencias', async (req, res) => {
+    if (!requireDemoRole(req, res, 'administrativo')) return
+    try {
+      const data = await listCounterReferralsForCesfam(pool)
+      return res.json({
+        total: data.length,
+        unread: data.filter(item => !item.read_at).length,
+        data,
+        demo: true,
+      })
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
+  app.get('/api/cesfam/contrarreferencias/pendientes', async (req, res) => {
+    if (!requireDemoRole(req, res, 'administrativo')) return
+    try {
+      return res.json({ unread: await countUnreadCounterReferrals(pool) })
+    } catch (error) {
+      return databaseError(res, error)
+    }
+  })
+
+  app.post('/api/cesfam/contrarreferencias/:id/leida', async (req, res) => {
+    if (!requireDemoRole(req, res, 'administrativo')) return
+    if (!validDemoReferralId(req.params.id)) {
+      return res.status(404).json({ error: 'No se encontró la interconsulta.' })
+    }
+    try {
+      const result = await markCounterReferralRead(pool, {
+        interconsultaId: req.params.id,
         actor: getDemoActor(req),
       })
       const { status, ...body } = result

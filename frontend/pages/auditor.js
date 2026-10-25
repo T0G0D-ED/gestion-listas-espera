@@ -72,7 +72,7 @@ function renderList() {
     list.innerHTML = '<p class="text-sm text-slate-500">No hay interconsultas de demostración asignadas.</p>'
     return
   }
-  const statusLabels = { pending: 'Pendiente de auditoría', returned: 'Devuelta al CESFAM', rejected: 'Rechazada definitivamente' }
+  const statusLabels = { pending: 'Pendiente de auditoría', returned: 'Devuelta al CESFAM', rejected: 'Rechazada definitivamente', counterreferred: 'Finalizada · Contra-derivada' }
   list.innerHTML = state.referrals.map(referral => {
     const reviewable = referral.status === 'pending'
     const previousDecision = referral.observations || referral.missing_exams || referral.rejection_reason

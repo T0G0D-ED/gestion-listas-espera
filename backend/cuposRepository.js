@@ -358,6 +358,117 @@ export async function resubmitReturnedInterconsulta(pool, {
   }
 }
 
+const specialistEstablishment = 'Hospital de referencia (demostración)'
+
+export async function listCounterReferrals(pool) {
+  const result = await pool.query(`
+    SELECT
+      workflow.interconsulta_id,
+      workflow.status,
+      workflow.issuer_establishment,
+      workflow.issuer_professional,
+      counter.final_diagnosis,
+      counter.indications,
+      counter.therapeutic_plan,
+      to_char(counter.attention_date, 'YYYY-MM-DD') AS attention_date,
+      counter.observations,
+      counter.specialist_name,
+      counter.created_at
+    FROM interconsulta_review_workflow AS workflow
+    LEFT JOIN interconsulta_counterreferrals AS counter
+      ON counter.interconsulta_id = workflow.interconsulta_id
+    ORDER BY (counter.id IS NULL) DESC, counter.created_at DESC, workflow.interconsulta_id
+  `)
+  return result.rows
+}
+
+export async function createCounterReferral(pool, {
+  interconsultaId,
+  finalDiagnosis,
+  indications,
+  therapeuticPlan,
+  attentionDate = null,
+  observations = '',
+  actor,
+}) {
+  const client = await pool.connect()
+  let transactionOpen = false
+
+  try {
+    await client.query('BEGIN')
+    transactionOpen = true
+    const found = await client.query(`
+      SELECT interconsulta_id, status, issuer_establishment
+      FROM interconsulta_review_workflow
+      WHERE interconsulta_id = $1
+      FOR UPDATE
+    `, [interconsultaId])
+    if (!found.rowCount) {
+      await client.query('ROLLBACK')
+      transactionOpen = false
+      return { status: 404, error: 'No se encontró la interconsulta de demostración.' }
+    }
+    if (found.rows[0].status !== 'pending') {
+      await client.query('ROLLBACK')
+      transactionOpen = false
+      return {
+        status: 409,
+        error: 'Solo se puede contrarreferir una interconsulta que no esté devuelta ni rechazada.',
+      }
+    }
+
+    const existing = await client.query(`
+      SELECT id FROM interconsulta_counterreferrals WHERE interconsulta_id = $1
+    `, [interconsultaId])
+    if (existing.rowCount) {
+      await client.query('ROLLBACK')
+      transactionOpen = false
+      return { status: 409, error: 'Esta interconsulta ya tiene una contrarreferencia registrada.' }
+    }
+
+    const result = await client.query(`
+      INSERT INTO interconsulta_counterreferrals (
+        interconsulta_id, final_diagnosis, indications, therapeutic_plan,
+        attention_date, observations, specialist_establishment, specialist_name
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING interconsulta_id, final_diagnosis, indications, therapeutic_plan,
+        to_char(attention_date, 'YYYY-MM-DD') AS attention_date,
+        observations, specialist_name, created_at
+    `, [
+      interconsultaId,
+      finalDiagnosis,
+      indications,
+      therapeuticPlan,
+      attentionDate,
+      observations || null,
+      specialistEstablishment,
+      actor.name,
+    ])
+    // La línea de tiempo es visible para el paciente: no incluye contenido clínico.
+    await insertTimelineEvent(client, {
+      interconsultaId,
+      eventType: 'counterreferred',
+      title: 'Contrarreferencia registrada',
+      details: 'El especialista registró la contrarreferencia hacia el CESFAM de origen.',
+      establishment: specialistEstablishment,
+      professionalName: actor.name,
+      actor,
+      isDemo: true,
+    })
+    await client.query('COMMIT')
+    transactionOpen = false
+    return { status: 201, data: result.rows[0] }
+  } catch (error) {
+    if (transactionOpen) await client.query('ROLLBACK')
+    if (error.code === '23505') {
+      return { status: 409, error: 'Esta interconsulta ya tiene una contrarreferencia registrada.' }
+    }
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
 export async function addToWaitlist(pool, {
   interconsultaId,
   especialidad,

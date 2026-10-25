@@ -26,6 +26,7 @@ export default defineConfig({
         timeline: fileURLToPath(new URL('./frontend/timeline.html', import.meta.url)),
         reservas: fileURLToPath(new URL('./frontend/reservas.html', import.meta.url)),
         asistencia: fileURLToPath(new URL('./frontend/asistencia.html', import.meta.url)),
+        contrarreferencia: fileURLToPath(new URL('./frontend/contrarreferencia.html', import.meta.url)),
       },
     },
   },

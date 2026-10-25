@@ -159,3 +159,19 @@ export async function cancelarReserva(reservationId, reason, otroMotivo) {
     body: JSON.stringify(details),
   })
 }
+
+
+export async function getCounterReferrals() {
+  const result = await request('/api/contrarreferencias', { cache: 'no-store' })
+  if (!Array.isArray(result.data)) {
+    throw new Error('La API no devolvió las contrarreferencias.')
+  }
+  return result.data
+}
+
+export async function createCounterReferral(interconsultaId, details) {
+  return request(`/api/interconsultas/${encodeURIComponent(interconsultaId)}/contrarreferencia`, {
+    method: 'POST',
+    body: JSON.stringify(details),
+  })
+}

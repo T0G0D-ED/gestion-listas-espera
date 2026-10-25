@@ -238,3 +238,17 @@ CREATE INDEX IF NOT EXISTS interconsulta_timeline_events_referral_idx
 
 CREATE INDEX IF NOT EXISTS interconsulta_review_workflow_status_idx
   ON interconsulta_review_workflow (status, updated_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS logs_auditoria (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    usuario VARCHAR(100) DEFAULT 'Anónimo',
+    accion VARCHAR(10) NOT NULL,
+    recurso VARCHAR(255) NOT NULL,
+    detalle JSONB,
+    ip_origen VARCHAR(45),
+    fecha_registro TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_logs_auditoria_fecha
+    ON logs_auditoria (fecha_registro DESC);

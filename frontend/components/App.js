@@ -21,6 +21,8 @@ ${offlineBannerTemplate}
       <section id="panel" class="bg-white border-2 border-brand rounded-xl p-5 text-sm" aria-live="polite"></section>
     </aside>
   </div>
+  <div id="interconsultas-extra" class="mt-8 space-y-6"></div>
 </main>
 <div id="modal-root"></div>
 ${syncToastTemplate}`
+

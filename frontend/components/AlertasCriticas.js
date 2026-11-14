@@ -1,8 +1,15 @@
 export function AlertasCriticas() {
     const contenedor = document.createElement('div');
-    contenedor.className = 'card border-danger shadow-sm my-3 p-3';
-    contenedor.style.backgroundColor = '#fff5f5';
-    contenedor.innerHTML = '<p class="text-muted">Cargando alertas críticas...</p>';
+    contenedor.style.cssText = `
+        background-color: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        padding: 1.5rem 2rem;
+        ;margin: 1.5rem 0;
+        font-family: system-ui, -apple-system, sans-serif;
+        max-width: 800px;
+    `;
+    contenedor.innerHTML = '<p style="color: #6b7280; font-size: 0.9rem; margin: 0;">Cargando alertas críticas...</p>';
 
     async function obtenerAlertas() {
         try {
@@ -11,26 +18,53 @@ export function AlertasCriticas() {
 
             if (!data.alertas || data.alertas.length === 0) {
                 contenedor.innerHTML = `
-                    <div class="d-flex align-items-center text-success">
-                        <span class="me-2">✅</span> 
+                    <div style="
+                        background-color: #ecfdf5; border-left: 4px solid #10b981;
+                        padding: 0.875rem 1rem; border-radius: 6px; color: #065f46;
+                        font-size: 0.95rem; font-weight: 500; display: flex; align-items: center; gap: 0.5rem;
+                    ">
+                        <span>✅</span>
                         <span>No hay interconsultas próximas a vencer (>= 80% límite).</span>
                     </div>`;
                 return;
             }
 
-            contenedor.innerHTML = `<h5 class="text-danger mb-2">⚠️ Alertas Críticas Detectadas (${data.total_alertas})</h5>`;
+            contenedor.innerHTML = `
+                <h4 style="color: #b91c1c; font-weight: 700; margin-top: 0; margin-bottom: 1rem; font-size: 1.1rem;">
+                    ⚠️ Alertas Críticas Detectadas (${data.total_alertas})
+                </h4>`;
+            
+            const lista = document.createElement('div');
+            lista.style.cssText = 'display: flex; flex-direction: column; gap: 0.75rem;';
+
             data.alertas.forEach(alerta => {
                 const item = document.createElement('div');
-                item.className = 'p-2 mb-2 border-start border-danger border-3 bg-white rounded shadow-xs';
-                item.innerHTML = `
-                    <strong>Paciente RUT:</strong> ${alerta.paciente_rut} | 
-                    <strong>Prioridad:</strong> ${alerta.prioridad} | 
-                    <strong>Tiempo usado:</strong> <span class="badge bg-danger">${alerta.porcentaje_tiempo_usado}%</span>
+                item.style.cssText = `
+                    background-color: #fef2f2; border-left: 4px solid #ef4444;
+                    padding: 0.875rem 1rem; border-radius: 6px; color: #1f2937;
+                    font-size: 0.9rem; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem;
                 `;
-                contenedor.appendChild(item);
+                item.innerHTML = `
+                    <div>
+                        <strong style="color: #991b1b;">Paciente RUT:</strong> ${alerta.paciente_rut} · 
+                        <strong style="color: #991b1b;">Prioridad:</strong> ${alerta.prioridad}
+                    </div>
+                    <span style="background-color: #dc2626; color: white; padding: 0.2rem 0.65rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 600;">
+                        Tiempo usado: ${alerta.porcentaje_tiempo_usado}%
+                    </span>
+                `;
+                lista.appendChild(item);
             });
+            contenedor.appendChild(lista);
         } catch (err) {
-            contenedor.innerHTML = '<span class="text-danger">❌ Error de conexión con el módulo de alertas.</span>';
+            contenedor.innerHTML = `
+                <div style="
+                    background-color: #fef2f2; border-left: 4px solid #ef4444;
+                    padding: 0.875rem 1rem; border-radius: 6px; color: #991b1b;
+                    font-size: 0.9rem; font-weight: 500;
+                ">
+                    ❌ Error de conexión con el módulo de alertas.
+                </div>`;
         }
     }
 

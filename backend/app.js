@@ -494,7 +494,6 @@ app.get('/api/contrarreferencias', async (req, res) => {
         error: 'Se requieren interconsultaId, especialidad, centroSolicitante, motivo y prioridadClinica entre 0 y 3.',
       })
     }
-
     try {
       const result = await addToWaitlist(pool, {
         interconsultaId: interconsultaId.trim(),
@@ -510,6 +509,60 @@ app.get('/api/contrarreferencias', async (req, res) => {
       return databaseError(res, error)
     }
   })
+
+
+  // TAREAS #54 Y #55: Crear interconsulta con sugerencia de prioridad y justificación obligatoria
+app.post('/api/interconsultas', async (req, res) => {
+  const { uuid, paciente_rut, centro_salud, especialidad, prioridad_sugerida, prioridad_final, justificacion_anulacion } = req.body ?? {}
+
+  // Validaciones básicas de campos requeridos
+  if (!uuid || !paciente_rut || !especialidad || !prioridad_final) {
+    return res.status(400).json({ error: 'Faltan campos obligatorios: uuid, paciente_rut, especialidad y prioridad_final.' })
+  }
+
+  // VALIDACIÓN TAREA #55: Si se baja la prioridad respecto a la sugerida, exigir justificación
+  const nivelPrioridad = { 'C1': 1, 'C2': 2, 'C3': 3, 'C4': 4 }
+  const nivelSugerido = nivelPrioridad[prioridad_sugerida] || 4
+  const nivelFinal = nivelPrioridad[prioridad_final] || 4
+
+  // Si el nivel numérico final es mayor, significa que se bajó la urgencia (ej: C1=1 -> C3=3)
+  if (nivelFinal > nivelSugerido) {
+    if (!justificacion_anulacion || typeof justificacion_anulacion !== 'string' || justificacion_anulacion.trim().length < 10) {
+      return res.status(400).json({ 
+        error: 'Ha disminuido la prioridad sugerida por el sistema. Debe proporcionar una justificación clínica válida (mínimo 10 caracteres).' 
+      })
+    }
+  }
+
+  try {
+    const query = `
+      INSERT INTO interconsultas 
+      (uuid, paciente_rut, centro_salud, especialidad, prioridad, prioridad_sugerida, justificacion_anulacion, estado, fecha_creacion)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'pendiente', NOW())
+      RETURNING uuid, paciente_rut, especialidad, prioridad, fecha_creacion
+    `
+    
+    const { rows } = await pool.query(query, [
+      uuid,
+      paciente_rut,
+      centro_salud || 'No especificado',
+      especialidad,
+      prioridad_final, // La prioridad oficial que queda registrada es la final
+      prioridad_sugerida || prioridad_final,
+      justificacion_anulacion || null
+    ])
+
+    // Registrar ID en contexto de auditoría (Tarea #38)
+    res.locals.resourceId = rows[0].uuid
+
+    return res.status(201).json({ 
+      message: 'Interconsulta creada exitosamente', 
+      data: rows[0] 
+    })
+  } catch (error) {
+    return databaseError(res, error)
+  }
+})
 
   app.post('/api/cupos/reservar', async (req, res) => {
     const {

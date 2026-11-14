@@ -252,3 +252,19 @@ CREATE TABLE IF NOT EXISTS logs_auditoria (
 
 CREATE INDEX IF NOT EXISTS idx_logs_auditoria_fecha
     ON logs_auditoria (fecha_registro DESC);
+
+CREATE TABLE IF NOT EXISTS interconsultas (
+    uuid VARCHAR(64) PRIMARY KEY,
+    paciente_rut VARCHAR(20) NOT NULL,
+    centro_salud VARCHAR(150) NOT NULL DEFAULT 'No especificado',
+    especialidad VARCHAR(150) NOT NULL,
+    prioridad VARCHAR(10) NOT NULL,
+    prioridad_sugerida VARCHAR(10),
+    justificacion_anulacion TEXT,
+    estado VARCHAR(30) NOT NULL DEFAULT 'pendiente',
+    fecha_creacion TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE interconsultas
+    ADD COLUMN IF NOT EXISTS prioridad_sugerida VARCHAR(10),
+    ADD COLUMN IF NOT EXISTS justificacion_anulacion TEXT;

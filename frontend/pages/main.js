@@ -23,9 +23,14 @@ import {
   subscribeToSyncQueueCount,
 } from '../services/syncQueue.js'
 import { downloadReceiptPdf } from '../services/receipt.js'
+import { AlertasCriticas } from '../components/AlertasCriticas.js'
+import { FormularioInterconsulta } from '../components/FormularioInterconsulta.js'
+
 
 document.querySelector('#app').innerHTML = appTemplate
 bindRoleSwitcher()
+document.querySelector('#interconsultas-extra').appendChild(AlertasCriticas())
+document.querySelector('#interconsultas-extra').appendChild(FormularioInterconsulta())
 
 const $ = s => document.querySelector(s);
 const store = {

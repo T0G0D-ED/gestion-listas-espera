@@ -34,6 +34,10 @@ Se propone el desarrollo de un sistema centralizado de gestión y seguimiento de
 * **Base de Datos:** PostgreSQL (Servidor Central) + IndexedDB / SQLite (Cálculo local y soporte Offline).
 * **Control de Versiones & Gestión:** Git, GitHub.
 
+## Casos de prueba funcionales
+
+Los casos de éxito y error para reserva de cupos, notificación y consulta del historial del paciente, junto con sus precondiciones, datos de prueba y pasos repetibles, están documentados en [CASOS_PRUEBA.md](./CASOS_PRUEBA.md).
+
 ## API y PostgreSQL
 
 La API central expone `GET /api/cupos` para consultar cupos futuros disponibles y `POST /api/cupos/reservar` para reservar una plaza. También permite consultar el historial de citas activas y canceladas con `GET /api/reservas`, reprogramarlas con `PATCH /api/reservas/:id/reprogramar` y cancelarlas con `PATCH /api/reservas/:id/cancelar`. Las reprogramaciones y cancelaciones requieren un motivo; al seleccionar `Otro` también se exige describirlo. Estas operaciones mantienen el historial de cambios y actualizan la disponibilidad dentro de transacciones PostgreSQL.
@@ -42,11 +46,35 @@ Los correos de reserva y reprogramación incluyen una plantilla con los datos va
 
 La lista de espera se consulta con `GET /api/lista-espera` y se registra con `POST /api/lista-espera`, enviando interconsulta, especialidad, centro, motivo y prioridad clínica de 0 a 3. Se ordena por prioridad descendente y, en empate, por antigüedad. Cancelar una cita (`PATCH /api/reservas/:id/cancelar`) la devuelve al final de su nivel de prioridad; reprogramarla (`PATCH /api/reservas/:id/reprogramar`) conserva la cita en el nuevo horario y libera el anterior. Al reservar desde la lista, el registro pasa a `scheduled`.
 
+### Modelo de priorización clínica (en preparación)
+
+La lista de espera permite asociar diagnósticos con sistema y versión de codificación (`CIE-10` o `CIE-11`), además de registrar evaluaciones por código/versión de escala, puntaje, rango, fecha y profesional evaluador. `POST /api/lista-espera` acepta los arreglos opcionales `diagnoses` y `severityAssessments`; `GET /api/lista-espera` los devuelve con cada registro. Las reglas configurables se almacenan en `waitlist_priority_rules`, con especialidad, diagnóstico, escala/umbral, prioridad resultante, versión, evidencia y aprobación.
+
+No se cargan reglas clínicas activas ni se calcula la prioridad automáticamente: la prioridad 0–3 sigue siendo ingresada por el profesional y ordena la lista como antes. CIE identifica y clasifica diagnósticos, pero no determina por sí mismo la urgencia de una persona. No se debe usar coincidencia por prefijo de código para asignar prioridad. Antes de activar reglas, un equipo clínico debe aprobar las combinaciones exactas de diagnóstico, escala, umbral y prioridad, documentar evidencia, resolver casos de datos incompletos o discordantes, y definir revisión/versionado y responsabilidad. El modelo de datos no sustituye ese protocolo ni la validación prospectiva.
+
+Para evaluación clínica en Traumatología adulto, se pueden considerar como candidatos —no como reglas aprobadas— una escala numérica de dolor 0–10 y medidas funcionales específicas por articulación como KOOS (rodilla) o HOOS (cadera). No son intercambiables ni, por sí solas, escalas de urgencia o de priorización de listas. KOOS/HOOS requieren revisar permisos de uso antes de incorporarlas; este repositorio no reproduce sus cuestionarios. La selección final, traducción/versión validada y puntos de corte deben definirse con especialistas y validarse en la población y flujo local. Referencias: [clasificación CIE de la OMS](https://www.who.int/standards/classifications/classification-of-diseases) y [permisos KOOS/HOOS](https://koos.nu/).
+
 La línea de tiempo tiene una página propia en `/timeline.html`, enlazada en la navegación entre **Interconsultas** y **Cupos tomados**. Permite consultar una interconsulta por su identificador y usa inicialmente el último ID seleccionado en Interconsultas. La API `GET /api/interconsultas/:id/linea-tiempo` devuelve eventos nuevos de lista de espera y citas, además del historial de reservas, reprogramaciones y cancelaciones. Para las 16 interconsultas de demostración también se crean hitos ficticios de ingreso, revisión y prioridad, identificados en la respuesta con `is_demo: true` y en pantalla como **Datos simulados · demo**. Los perfiles de la interfaz son una simulación: no autentican ni autorizan usuarios. No usar esta funcionalidad con datos reales hasta integrar identidad institucional, permisos en el servidor y eventos clínicos verificados.
 
 El perfil **Médico auditor · Dr. Kosme Fulanito** muestra las 16 interconsultas de demostración asignadas en **Interconsultas**, con opciones para devolverlas con observaciones/exámenes requeridos o rechazarlas definitivamente con justificación obligatoria. Una devolución se notifica a `RESEND_TEST_EMAIL`; si Resend falla, la devolución queda guardada y la interfaz informa del problema. El rechazo es terminal. El perfil Administrativo CESFAM dispone de **Devueltas al CESFAM** para agregar una respuesta y/o exámenes y reenviar el mismo ID al auditor, sin modificar el contenido original. Los cambios quedan anotados en la línea de tiempo. En el perfil del médico, **Cupos tomados** solo presenta citas vinculadas a sus interconsultas de demostración y permite cancelarlas o reprogramarlas. Ejecuta `npm run db:migrate` para crear y sembrar el estado inicial del flujo. Los perfiles siguen siendo una simulación local, no controles de acceso productivos.
 
 El menú de perfil de la esquina superior derecha permite cambiar entre **Administrativo CESFAM** y **Paciente**. El perfil Paciente abre **Inicio**, una vista pública adaptable para consultar la línea de tiempo asociada al RUT, sin ClaveÚnica ni código de verificación en esta simulación. `GET /api/pacientes/linea-tiempo?rut=...` resuelve únicamente RUTs ficticios asociados uno a uno con las 16 interconsultas de demostración; `GET /api/pacientes/ruts-demostracion` lista esos pares para probar la interfaz. Esta búsqueda no autentica la identidad ni debe usarse con RUTs, pacientes o datos clínicos reales.
+
+### Inicio rápido con Docker Compose
+
+Requisitos: Docker Desktop (incluye Docker Compose) en ejecución. Desde la carpeta del proyecto, inicia la aplicación completa:
+
+```powershell
+docker compose up --build
+```
+
+En el primer inicio se crea PostgreSQL, se aplican las migraciones y se cargan los datos de demostración si la base está vacía. Luego abre `http://localhost:5173`; la API queda disponible en `http://localhost:3000/api/health`. Deja la terminal abierta mientras uses la aplicación. Para detener los servicios, pulsa `Ctrl+C` y ejecuta `docker compose down`.
+
+Los datos de PostgreSQL se conservan en el volumen `postgres_data` al detener los contenedores. Las credenciales incluidas en Compose son solo para desarrollo local: no las uses en producción. Para habilitar correos de prueba, define `RESEND_API_KEY` y `RESEND_TEST_EMAIL` en el entorno o en el `.env` local antes de iniciar Compose; sin ellas, las funciones que envían correo no estarán configuradas.
+
+El sembrado automático solo ocurre cuando la tabla de cupos está vacía, así no se desplazan las fechas de demostración en cada reinicio. Si quieres actualizar esas fechas manualmente, ejecuta `docker compose exec backend npm run db:seed`; esto también modifica las fechas de reservas asociadas y debe usarse solo con datos de demostración.
+
+### Inicio local sin Docker
 
 Para iniciar el backend local:
 
@@ -78,6 +106,8 @@ Antes de continuar, inicia PostgreSQL y crea la base de datos indicada en `DATAB
 npm run db:migrate
 npm run db:seed
 ```
+
+Si vencen las fechas de demostración, vuelve a ejecutar `npm run db:seed`: actualizará los 12 cupos ficticios a sus próximas fechas semanales y recalculará la disponibilidad según las reservas activas. Esto también cambia la fecha de las reservas asociadas; úsalo solo con datos de demostración.
 
 Si ya tenías instalada una versión anterior, vuelve a ejecutar `npm run db:migrate` para crear el historial unificado de la línea de tiempo y cargar sus hitos de demostración.
 
@@ -138,13 +168,36 @@ La reserva recibe `cupoId`, `interconsultaId` y `centroSolicitante`; se usa el i
 
 ```text
 .
-├── src/
-│   ├── config/          # Configuraciones globales (base de datos, variables de entorno)
-│   ├── js/              # Manejo de Node.js
-│   ├── routes/          # Definición de rutas y endpoints de la API
-│   └── assets/          # Archivos estáticos de la interfaz frontend (HTML, CSS, JS cliente)
-├── docs/                # Documentación del proyecto, diagramas y entrega de Unidades
-├── data/                # Informacion pre cargada
-├── .gitignore           # Archivos e historial excluidos de Git
-├── package.json         # Dependencias y scripts del proyecto Node.js
-└── README.md            # Presentación general del proyecto
+|-- backend/                     # API Express, lógica de negocio y persistencia
+|   |-- db/
+|   |   |-- migrate.js           # Migraciones del esquema PostgreSQL
+|   |   |-- init.js              # Migra y siembra datos solo si la base está vacía
+|   |   |-- pool.js              # Conexión y pool de PostgreSQL
+|   |   |-- schema.sql           # Esquema de la base de datos
+|   |   `-- seed.js              # Datos de demostración
+|   |-- app.js                   # Aplicación Express y endpoints
+|   |-- server.js                # Inicio del servidor HTTP
+|   |-- cuposRepository.js       # Acceso a datos de cupos y reservas
+|   |-- demoPatients.js          # Datos ficticios para pacientes de demostración
+|   |-- resendNotifications.js   # Notificaciones de correo mediante Resend
+|   `-- *.test.js                # Pruebas del backend
+|-- frontend/                    # Aplicación multipágina y PWA (raíz de Vite)
+|   |-- assets/                  # Estilos e iconos
+|   |-- components/              # Componentes de interfaz compartidos
+|   |-- data/                    # Datos estáticos servidos por Vite
+|   |-- pages/                   # Logica de cada página y service worker
+|   |-- services/                # Cliente API, comprobantes y cola offline
+|   `-- *.html                   # Entradas multipágina (interconsultas, reservas, etc.)
+|-- src/assets/index.html        # HTML residual; no es la raíz de la aplicacion Vite
+|-- correr-cesfam.md             # Guía operativa para ejecutar el sistema
+|-- registro_daily_scrum.docx    # Registro de seguimiento del equipo
+|-- compose.yaml                 # Servicios locales: PostgreSQL, API y frontend
+|-- Dockerfile                   # Imagen Node.js para los servicios de la aplicación
+|-- vite.config.js               # Configuración de Vite, proxy API y PWA
+|-- package.json                 # Dependencias y scripts de desarrollo, pruebas y base de datos
+|-- package-lock.json            # Versiones exactas de dependencias npm
+|-- .gitignore                   # Exclusiones de Git (incluye .env y artefactos generados)
+`-- README.md                    # Descripción, configuracion y uso del proyecto
+```
+
+Las carpetas `node_modules/` y `frontend/dist/` contienen dependencias instaladas y archivos generados por el build, respectivamente; no son codigo fuente.

@@ -88,6 +88,74 @@ CREATE TABLE IF NOT EXISTS appointment_waitlist (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS waitlist_diagnoses (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  interconsulta_id TEXT NOT NULL REFERENCES appointment_waitlist(interconsulta_id) ON DELETE CASCADE,
+  coding_system TEXT NOT NULL CHECK (coding_system IN ('CIE-10', 'CIE-11')),
+  coding_version TEXT NOT NULL,
+  code TEXT NOT NULL,
+  display TEXT NOT NULL,
+  is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+  recorded_by TEXT NOT NULL,
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS waitlist_diagnoses_interconsulta_idx
+  ON waitlist_diagnoses (interconsulta_id, is_primary DESC, recorded_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS waitlist_diagnoses_one_primary_idx
+  ON waitlist_diagnoses (interconsulta_id)
+  WHERE is_primary;
+
+CREATE TABLE IF NOT EXISTS waitlist_severity_assessments (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  interconsulta_id TEXT NOT NULL REFERENCES appointment_waitlist(interconsulta_id) ON DELETE CASCADE,
+  scale_code TEXT NOT NULL,
+  scale_version TEXT NOT NULL,
+  score NUMERIC NOT NULL,
+  minimum_score NUMERIC NOT NULL,
+  maximum_score NUMERIC NOT NULL,
+  assessed_by TEXT NOT NULL,
+  assessed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (minimum_score < maximum_score),
+  CHECK (score >= minimum_score AND score <= maximum_score)
+);
+
+CREATE INDEX IF NOT EXISTS waitlist_severity_interconsulta_idx
+  ON waitlist_severity_assessments (interconsulta_id, assessed_at DESC);
+
+CREATE TABLE IF NOT EXISTS waitlist_priority_rules (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  specialty TEXT NOT NULL,
+  coding_system TEXT NOT NULL CHECK (coding_system IN ('CIE-10', 'CIE-11')),
+  diagnosis_code TEXT NOT NULL,
+  scale_code TEXT NOT NULL,
+  score_operator TEXT NOT NULL CHECK (score_operator IN ('gte', 'lte', 'between')),
+  minimum_score NUMERIC,
+  maximum_score NUMERIC,
+  priority_level SMALLINT NOT NULL CHECK (priority_level BETWEEN 0 AND 3),
+  rule_version TEXT NOT NULL,
+  rationale TEXT NOT NULL,
+  evidence_reference TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft', 'pending_validation', 'active', 'retired')),
+  approved_by TEXT,
+  approved_at TIMESTAMPTZ,
+  effective_from DATE,
+  effective_to DATE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (
+    (score_operator = 'gte' AND minimum_score IS NOT NULL AND maximum_score IS NULL)
+    OR (score_operator = 'lte' AND minimum_score IS NULL AND maximum_score IS NOT NULL)
+    OR (score_operator = 'between' AND minimum_score IS NOT NULL AND maximum_score IS NOT NULL
+      AND minimum_score <= maximum_score)
+  ),
+  CHECK (status <> 'active' OR (approved_by IS NOT NULL AND approved_at IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS waitlist_priority_rules_lookup_idx
+  ON waitlist_priority_rules (specialty, coding_system, diagnosis_code, scale_code, status);
+
 CREATE TABLE IF NOT EXISTS interconsulta_timeline_events (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   interconsulta_id TEXT NOT NULL,

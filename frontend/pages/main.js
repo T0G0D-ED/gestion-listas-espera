@@ -355,15 +355,19 @@ $('#panel').addEventListener('click', async e => {
       cupoId: slot.id,
       interconsultaId,
       centroSolicitante: 'CESFAM Nuevo Horizonte',
+      especialidad: 'Traumatología adulto',
+      prioridadClinica: 1,
     }
     try {
-      const result = await reservarCupo({
-        cupoId: slot.id,
-        interconsultaId,
-        centroSolicitante: 'CESFAM Nuevo Horizonte',
-        especialidad: 'Traumatología adulto',
-        prioridadClinica: 1,
-      })
+      if (!online()) {
+        await enqueueReservation(reservation)
+        await refreshPendingOperations()
+        renderReferralContext()
+        renderList()
+        return
+      }
+
+      const result = await reservarCupo(reservation)
       const updatedSlot = { ...slot, ...result.data.slot }
       state.slots = state.slots.map(item => item.id === slot.id ? updatedSlot : item)
       try {

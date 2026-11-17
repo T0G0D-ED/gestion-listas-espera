@@ -115,6 +115,29 @@ export async function listWaitlist(pool) {
       prioridad_clinica,
       motivo,
       entered_at,
+      COALESCE((
+        SELECT json_agg(json_build_object(
+          'codingSystem', diagnosis.coding_system,
+          'codingVersion', diagnosis.coding_version,
+          'code', diagnosis.code,
+          'display', diagnosis.display,
+          'isPrimary', diagnosis.is_primary
+        ) ORDER BY diagnosis.is_primary DESC, diagnosis.recorded_at DESC)
+        FROM waitlist_diagnoses AS diagnosis
+        WHERE diagnosis.interconsulta_id = appointment_waitlist.interconsulta_id
+      ), '[]'::json) AS diagnoses,
+      COALESCE((
+        SELECT json_agg(json_build_object(
+          'scaleCode', assessment.scale_code,
+          'scaleVersion', assessment.scale_version,
+          'score', assessment.score,
+          'minimumScore', assessment.minimum_score,
+          'maximumScore', assessment.maximum_score,
+          'assessedAt', assessment.assessed_at
+        ) ORDER BY assessment.assessed_at DESC)
+        FROM waitlist_severity_assessments AS assessment
+        WHERE assessment.interconsulta_id = appointment_waitlist.interconsulta_id
+      ), '[]'::json) AS severity_assessments,
       ROW_NUMBER() OVER (ORDER BY prioridad_clinica DESC, entered_at ASC, id ASC)::integer AS position
     FROM appointment_waitlist
     WHERE status = 'waiting'
@@ -569,6 +592,8 @@ export async function addToWaitlist(pool, {
   centroSolicitante,
   prioridadClinica,
   reason,
+  diagnoses = [],
+  severityAssessments = [],
   actor = defaultActor,
 }) {
   const client = await pool.connect()
@@ -599,6 +624,39 @@ export async function addToWaitlist(pool, {
       await client.query('ROLLBACK')
       transactionOpen = false
       return { status: 409, error: 'La interconsulta ya está registrada en la lista de espera.' }
+    }
+
+    for (const diagnosis of diagnoses) {
+      await client.query(`
+        INSERT INTO waitlist_diagnoses (
+          interconsulta_id, coding_system, coding_version, code, display, is_primary, recorded_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `, [
+        interconsultaId,
+        diagnosis.codingSystem,
+        diagnosis.codingVersion,
+        diagnosis.code,
+        diagnosis.display,
+        diagnosis.isPrimary ?? false,
+        actor.name,
+      ])
+    }
+
+    for (const assessment of severityAssessments) {
+      await client.query(`
+        INSERT INTO waitlist_severity_assessments (
+          interconsulta_id, scale_code, scale_version, score, minimum_score,
+          maximum_score, assessed_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `, [
+        interconsultaId,
+        assessment.scaleCode,
+        assessment.scaleVersion,
+        assessment.score,
+        assessment.minimumScore,
+        assessment.maximumScore,
+        actor.name,
+      ])
     }
 
     await insertTimelineEvent(client, {

@@ -44,6 +44,113 @@ test('other reason requires a written explanation', async t => {
   assert.match((await response.json()).error, /otro/i)
 })
 
+test('waitlist rejects unrecognized diagnosis systems and invalid severity scores', async t => {
+  const baseUrl = await startTestServer(t)
+  const invalidDiagnosis = await fetch(`${baseUrl}/api/lista-espera`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      interconsultaId: 'IC-TEST-1',
+      especialidad: 'Traumatología adulto',
+      centroSolicitante: 'CESFAM de prueba',
+      prioridadClinica: 1,
+      motivo: 'Evaluación de prueba',
+      diagnoses: [{
+        codingSystem: 'otro',
+        codingVersion: '2026',
+        code: 'M25.5',
+        display: 'Dolor articular',
+      }],
+    }),
+  })
+  const invalidScore = await fetch(`${baseUrl}/api/lista-espera`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      interconsultaId: 'IC-TEST-2',
+      especialidad: 'Traumatología adulto',
+      centroSolicitante: 'CESFAM de prueba',
+      prioridadClinica: 1,
+      motivo: 'Evaluación de prueba',
+      severityAssessments: [{
+        scaleCode: 'NRS-11',
+        scaleVersion: '1',
+        score: 11,
+        minimumScore: 0,
+        maximumScore: 10,
+      }],
+    }),
+  })
+
+  assert.equal(invalidDiagnosis.status, 400)
+  assert.equal(invalidScore.status, 400)
+})
+
+test('waitlist records diagnosis coding and versioned severity assessment', async t => {
+  const recorded = []
+  const pool = {
+    async connect() {
+      return {
+        async query(sql, values = []) {
+          const statement = sql.replace(/\s+/g, ' ').trim().toUpperCase()
+          if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(statement)) {
+            return { rows: [], rowCount: 0 }
+          }
+          if (statement.startsWith('SELECT ID FROM APPOINTMENT_RESERVATIONS')) {
+            return { rows: [], rowCount: 0 }
+          }
+          if (statement.startsWith('INSERT INTO APPOINTMENT_WAITLIST')) {
+            return {
+              rows: [{ waitlist_id: '1', interconsulta_id: values[0] }],
+              rowCount: 1,
+            }
+          }
+          recorded.push({ statement, values })
+          return { rows: [], rowCount: 1 }
+        },
+        release() {},
+      }
+    },
+  }
+  const baseUrl = await startTestServer(t, pool)
+  const response = await fetch(`${baseUrl}/api/lista-espera`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      interconsultaId: 'IC-TEST-3',
+      especialidad: 'Traumatología adulto',
+      centroSolicitante: 'CESFAM de prueba',
+      prioridadClinica: 1,
+      motivo: 'Evaluación de demostración',
+      diagnoses: [{
+        codingSystem: 'CIE-10',
+        codingVersion: '2019',
+        code: 'M25.5',
+        display: 'Dolor articular',
+        isPrimary: true,
+      }],
+      severityAssessments: [{
+        scaleCode: 'NRS-11',
+        scaleVersion: '1',
+        score: 7,
+        minimumScore: 0,
+        maximumScore: 10,
+      }],
+    }),
+  })
+  const payload = await response.json()
+
+  assert.equal(response.status, 201)
+  assert.equal(payload.data.interconsulta_id, 'IC-TEST-3')
+  assert.ok(recorded.some(({ statement, values }) =>
+    statement.startsWith('INSERT INTO WAITLIST_DIAGNOSES') && values.includes('CIE-10'),
+  ))
+  assert.ok(recorded.some(({ statement, values }) =>
+    statement.startsWith('INSERT INTO WAITLIST_SEVERITY_ASSESSMENTS')
+    && values.includes('NRS-11') && values.includes(7),
+  ))
+})
+
 test('outdated reservation schema returns a migration instruction', async t => {
   const baseUrl = await startTestServer(t, {
     async query() {

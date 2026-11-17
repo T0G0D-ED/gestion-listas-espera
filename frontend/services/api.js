@@ -133,10 +133,26 @@ export async function getListaEspera() {
   return result.data
 }
 
-export async function agregarAListaEspera({ interconsultaId, especialidad, centroSolicitante, prioridadClinica, motivo }) {
+export async function agregarAListaEspera({
+  interconsultaId,
+  especialidad,
+  centroSolicitante,
+  prioridadClinica,
+  motivo,
+  diagnoses = [],
+  severityAssessments = [],
+}) {
   return request('/api/lista-espera', {
     method: 'POST',
-    body: JSON.stringify({ interconsultaId, especialidad, centroSolicitante, prioridadClinica, motivo }),
+    body: JSON.stringify({
+      interconsultaId,
+      especialidad,
+      centroSolicitante,
+      prioridadClinica,
+      motivo,
+      diagnoses,
+      severityAssessments,
+    }),
   })
 }
 

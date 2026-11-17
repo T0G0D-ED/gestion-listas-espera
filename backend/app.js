@@ -486,12 +486,46 @@ app.get('/api/contrarreferencias', async (req, res) => {
   })
 
   app.post('/api/lista-espera', async (req, res) => {
-    const { interconsultaId, especialidad, centroSolicitante, prioridadClinica, motivo } = req.body ?? {}
+    const {
+      interconsultaId,
+      especialidad,
+      centroSolicitante,
+      prioridadClinica,
+      motivo,
+      diagnoses = [],
+      severityAssessments = [],
+    } = req.body ?? {}
+    const validText = (value, maxLength) =>
+      typeof value === 'string' && value.trim().length > 0 && value.length <= maxLength
+    const validDiagnoses = Array.isArray(diagnoses)
+      && diagnoses.length <= 10
+      && diagnoses.every(diagnosis =>
+        diagnosis && typeof diagnosis === 'object'
+        && ['CIE-10', 'CIE-11'].includes(diagnosis.codingSystem)
+        && validText(diagnosis.codingVersion, 40)
+        && validText(diagnosis.code, 32)
+        && validText(diagnosis.display, 300)
+        && (diagnosis.isPrimary === undefined || typeof diagnosis.isPrimary === 'boolean'),
+      )
+    const validAssessments = Array.isArray(severityAssessments)
+      && severityAssessments.length <= 10
+      && severityAssessments.every(assessment =>
+        assessment && typeof assessment === 'object'
+        && validText(assessment.scaleCode, 80)
+        && validText(assessment.scaleVersion, 40)
+        && Number.isFinite(assessment.score)
+        && Number.isFinite(assessment.minimumScore)
+        && Number.isFinite(assessment.maximumScore)
+        && assessment.minimumScore < assessment.maximumScore
+        && assessment.score >= assessment.minimumScore
+        && assessment.score <= assessment.maximumScore,
+      )
     if (![interconsultaId, especialidad, centroSolicitante, motivo].every(value =>
       typeof value === 'string' && value.trim().length > 0,
-    ) || !Number.isInteger(prioridadClinica) || prioridadClinica < 0 || prioridadClinica > 3) {
+    ) || !Number.isInteger(prioridadClinica) || prioridadClinica < 0 || prioridadClinica > 3
+      || !validDiagnoses || !validAssessments) {
       return res.status(400).json({
-        error: 'Se requieren interconsultaId, especialidad, centroSolicitante, motivo y prioridadClinica entre 0 y 3.',
+        error: 'Verifica los datos requeridos, la prioridad 0-3 y el formato de diagnósticos CIE-10/CIE-11 o evaluaciones de severidad.',
       })
     }
     try {
@@ -501,6 +535,8 @@ app.get('/api/contrarreferencias', async (req, res) => {
         centroSolicitante: centroSolicitante.trim(),
         prioridadClinica,
         reason: motivo.trim(),
+        diagnoses,
+        severityAssessments,
         actor: getDemoActor(req),
       })
       const { status, ...body } = result
